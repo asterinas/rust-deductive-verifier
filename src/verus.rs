@@ -146,7 +146,19 @@ pub fn system_crates() -> HashSet<&'static str> {
         ])
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+#[memoize]
+pub fn system_crates() -> HashSet<&'static str> {
+    HashSet::from([
+        "build-script-build",
+        "borsh",
+        "vstd", 
+        "verus_builtin",
+        "verus_builtin_macros",
+        ])
+}
+
+#[cfg(target_os = "macos")]
 #[memoize]
 pub fn system_crates() -> HashSet<&'static str> {
     HashSet::from([
