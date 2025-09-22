@@ -36,6 +36,11 @@ pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
 pub const VERUS_EVN: &str = "VERUS_PATH";
 
 #[cfg(target_os = "windows")]
+pub const VERUSFMT_BIN: &str = "verusfmt.exe";
+#[cfg(not(target_os = "windows"))]
+pub const VERUSFMT_BIN: &str = "verusfmt";
+
+#[cfg(target_os = "windows")]
 pub const RUST_VERIFY: &str = "rust_verify.exe";
 #[cfg(not(target_os = "windows"))]
 pub const RUST_VERIFY: &str = "rust_verify";

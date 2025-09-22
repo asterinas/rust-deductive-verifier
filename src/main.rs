@@ -1,6 +1,6 @@
-use clap::{Parser, Subcommand, ArgAction};
-use rust_dv::helper::*;
+use clap::{ArgAction, Parser, Subcommand};
 use colored::Colorize;
+use rust_dv::helper::*;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -16,61 +16,63 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-
     #[command(
         name = "verify",
         about = "Verify the verification targets",
-        alias = "v",
+        alias = "v"
     )]
     Verify(VerifyArgs),
 
     #[command(
         name = "doc",
-        about = "Generate documentation for the verification targets",
+        about = "Generate documentation for the verification targets"
     )]
     Doc(DocArgs),
 
     #[command(
         name = "bootstrap",
         about = "Bootstrap the Verus toolchain",
-        alias = "bs",
+        alias = "bs"
     )]
     Bootstrap(BootstrapArgs),
 
     #[command(
         name = "compile",
         about = "Compile the verification targets",
-        alias = "c",
+        alias = "c"
     )]
     Compile(CompileArgs),
 
     #[command(
         name = "fingerprint",
         about = "Print the fingerprint of the verification targets",
-        alias = "fp",
+        alias = "fp"
     )]
     Fingerprint(FingerprintArgs),
 
     #[command(
         name = "list",
         about = "List all available verification targets",
-        alias = "ls",
+        alias = "ls"
     )]
     ListTargets(ListTargetsArgs),
 
-    #[command(
-        name = "new",
-        about = "Create a new verification target",
-        alias = "n",
-    )]
+    #[command(name = "new", about = "Create a new verification target", alias = "n")]
     NewTarget(NewTargetArgs),
 
     #[command(
         name = "show",
         about = "Show the details of a syntax item",
-        alias = "s",
+        alias = "s"
     )]
     ShowItem(ShowItemArgs),
+
+    #[command(
+        name = "format",
+        about = "Format the source code of a verification target",
+        alias = "f"
+    )]
+    Format(FmtArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -104,13 +106,12 @@ struct BootstrapArgs {
         action = ArgAction::SetTrue
     )]
     debug: bool,
-
 }
 
 #[derive(Parser, Debug)]
 struct VerifyArgs {
     #[arg(
-        short = 't', 
+        short = 't',
         long = "targets", 
         value_parser = verus::find_target,
         help = "The targets to verify", 
@@ -119,7 +120,7 @@ struct VerifyArgs {
     targets: Vec<VerusTarget>,
 
     #[arg(
-        short = 'e', 
+        short = 'e',
         long = "max-errors",
         help = "The maximum number of errors to display",
         default_value = "5", 
@@ -127,16 +128,16 @@ struct VerifyArgs {
     max_errors: usize,
 
     #[arg(
-        short = 'i', 
+        short = 'i',
         long = "import", 
         value_parser = verus::find_target,
         help = "Import verified local crates (they need to be compiled first)",
-        num_args = 0.., 
+        num_args = 0..,
         action = ArgAction::Append)]
     imports: Vec<VerusTarget>,
 
     #[arg(
-        short = 'l', 
+        short = 'l',
         long = "log",
         help = "Log the verification process",
         default_value = "false", 
@@ -172,7 +173,7 @@ struct VerifyArgs {
 #[derive(Parser, Debug)]
 struct DocArgs {
     #[arg(
-        short = 't', 
+        short = 't',
         long = "targets", 
         value_parser = verus::find_target,
         help = "The targets to generate document", 
@@ -185,24 +186,24 @@ struct DocArgs {
 struct CompileArgs {
     #[arg(
         short = 't', 
-        long = "targets", 
+        long = "targets",
         value_parser = verus::find_target,
-        help = "The targets to compile", 
+        help = "The targets to compile",
         num_args = 0..,
         action = ArgAction::Append)]
     targets: Vec<VerusTarget>,
 
     #[arg(
-        short = 'i', 
+        short = 'i',
         long = "import", 
         value_parser = verus::find_target,
         help = "Import verified local crates (they need to be compiled first)",
-        num_args = 0.., 
+        num_args = 0..,
         action = ArgAction::Append)]
     imports: Vec<VerusTarget>,
 
     #[arg(
-        short = 'e', 
+        short = 'e',
         long = "max-errors",
         help = "The maximum number of errors to display",
         default_value = "5", 
@@ -210,7 +211,7 @@ struct CompileArgs {
     max_errors: usize,
 
     #[arg(
-        short = 'l', 
+        short = 'l',
         long = "log",
         help = "Log the verification process",
         default_value = "false", 
@@ -227,16 +228,16 @@ struct CompileArgs {
     trace: bool,
 
     #[arg(
-        short = 'd', 
-        long = "debug", 
+        short = 'd',
+        long = "debug",
         default_value = "false",
         help = "Build artifacts in debug mode",
         action = ArgAction::SetTrue)]
     debug: bool,
 
     #[arg(
-        short = 'a', 
-        long = "disasm", 
+        short = 'a',
+        long = "disasm",
         default_value = "false",
         help = "Do not disassemble the compiled binary",
         action = ArgAction::SetTrue)]
@@ -253,7 +254,7 @@ struct CompileArgs {
 #[derive(Parser, Debug)]
 struct FingerprintArgs {
     #[arg(
-        short = 't', 
+        short = 't',
         long = "targets", 
         value_parser = verus::find_target,
         help = "The targets to fingerprint", 
@@ -263,13 +264,13 @@ struct FingerprintArgs {
 }
 
 #[derive(Parser, Debug)]
-struct ListTargetsArgs { }
+struct ListTargetsArgs {}
 
 #[derive(Parser, Debug)]
 struct NewTargetArgs {
     #[arg(
         help = "Name of the new target (created under verification/)",
-        allow_hyphen_values = true,
+        allow_hyphen_values = true
     )]
     name: String,
 }
@@ -289,13 +290,13 @@ struct ShowItemArgs {
         help = "The package to look into",
         action = ArgAction::Set,)]
     package: String,
-    
+
     #[arg(
         short = 't',
         long = "info",
         help = "The type of information to show",
         value_enum,
-        default_value = "struct",
+        default_value = "struct"
     )]
     info_type: SupportedShowItem,
 
@@ -347,9 +348,17 @@ struct TranslateArgs {
         long = "block",
         help = "The type of block to translate (e.g., function context)",
         value_enum,
-        default_value = "func-context",
+        default_value = "func-context"
     )]
     block_type: TranslateBlockType,
+}
+
+#[derive(Parser, Debug)]
+struct FmtArgs {
+    #[arg(short = 't', long = "targets", value_parser = format::target_parser,
+        help = "The targets to format", num_args = 0..,
+        action = ArgAction::Append)]
+    targets: Vec<String>,
 }
 
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
@@ -377,7 +386,7 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
         release: !args.debug,
         restart: args.restart,
     };
-    
+
     if args.upgrade {
         verus::install::exec_upgrade(&options)
     } else {
@@ -410,21 +419,15 @@ fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
 
 fn list_targets(_args: &ListTargetsArgs) -> Result<(), DynError> {
     let targets = verus::verus_targets();
-    let width = targets.keys()
-        .map(|s| s.len())
-        .max()
-        .unwrap_or(0)
-        .min(70) + 1;
+    let width = targets.keys().map(|s| s.len()).max().unwrap_or(0).min(70) + 1;
 
     for (name, target) in targets {
-        println!("{:<width$}: {} {}\n  {}",
+        println!(
+            "{:<width$}: {} {}\n  {}",
             name.blue(),
             target.dir.to_string_lossy().bright_black(),
             target.version.bright_yellow(),
-            format!("{:<width$}features = [{}]",
-                "",
-                target.features.join(", "))
-                .bright_black(),
+            format!("{:<width$}features = [{}]", "", target.features.join(", ")).bright_black(),
         );
     }
     Ok(())
@@ -447,9 +450,10 @@ fn show_item(args: &ShowItemArgs) -> Result<(), DynError> {
     match args.info_type {
         SupportedShowItem::Struct => {
             let struct_info = show::find_struct_in_package(package, id)?;
-            struct_info.iter()
+            struct_info
+                .iter()
                 .for_each(|s| println!("{}", s.as_string()));
-        },
+        }
         _ => {
             error!("Unsupported item type: {:?}", args.info_type);
         }
@@ -458,18 +462,27 @@ fn show_item(args: &ShowItemArgs) -> Result<(), DynError> {
     Ok(())
 }
 
+fn format(args: &FmtArgs) -> Result<(), DynError> {
+    // do `cargo fmt` befor verusfmt
+    format::run_cargo_fmt(&args.targets);
+
+    // format the source code of vostd
+    format::format_vostd(&args.targets);
+    Ok(())
+}
 
 fn main() {
     let cli = Cli::parse();
     if let Err(e) = match &cli.command {
-        Commands::Verify(args) => { verify(args) }
-        Commands::Doc(args) => { doc(args) }
-        Commands::Bootstrap(args) => { bootstrap(args) }
-        Commands::Compile(args) => { compile(args) }
-        Commands::Fingerprint(args) => { fingerprint(args) }
-        Commands::ListTargets(args) => { list_targets(args) }
-        Commands::NewTarget(args) => { new_target(args) }
-        Commands::ShowItem(args) => { show_item(args) }
+        Commands::Verify(args) => verify(args),
+        Commands::Doc(args) => doc(args),
+        Commands::Bootstrap(args) => bootstrap(args),
+        Commands::Compile(args) => compile(args),
+        Commands::Fingerprint(args) => fingerprint(args),
+        Commands::ListTargets(args) => list_targets(args),
+        Commands::NewTarget(args) => new_target(args),
+        Commands::ShowItem(args) => show_item(args),
+        Commands::Format(args) => format(args),
     } {
         error!("Error when executing command `{:?}`: {}", cli.command, e);
     }

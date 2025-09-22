@@ -1,29 +1,29 @@
 pub use colored::Colorize;
 
-
-pub mod files;
 pub mod executable;
+pub mod files;
 #[macro_use]
 pub mod console;
-pub mod projects;
 pub mod commands;
-pub mod verus;
-pub mod serialization;
-pub mod generator;
-pub mod dep_tree;
 pub mod config;
+pub mod dep_tree;
 pub mod fingerprint;
-pub mod toolchain;
-pub mod new;
+pub mod format;
+pub mod generator;
 pub mod metadata;
+pub mod new;
 pub mod parser;
+pub mod projects;
+pub mod serialization;
 pub mod show;
+pub mod toolchain;
+pub mod verus;
 
 pub mod helper {
+    pub use super::console::Console;
+    pub use super::verus::DynError;
+    pub use super::verus::VerusTarget;
+    pub use super::*;
     #[allow(unused_imports)]
     pub use colored::Colorize;
-    pub use super::*;
-    pub use super::verus::VerusTarget;
-    pub use super::verus::DynError;
-    pub use super::console::Console;
 }
