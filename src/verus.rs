@@ -1140,7 +1140,7 @@ pub mod install {
         let z3 = verus_source_dir().join("z3");
         if !z3.exists() {
             info!("Z3 not found, downloading...");
-            Command::new("bash")
+            Command::new("bash")   
                 .current_dir(verus_source_dir())
                 .arg("-c")
                 .arg("./tools/get-z3.sh")
@@ -1153,11 +1153,12 @@ pub mod install {
     }
 
     #[cfg(target_os = "windows")]
-    pub fn build_verus() -> Result<(), DynError> {
+    pub fn build_verus(release:bool) -> Result<(), DynError> {
         let cmd = &mut Command::new("powershell");
         cmd.current_dir(verus_source_dir())
             .arg("/c")
-            .arg("& '..\\tools\\activate.ps1'; vargo build --release --features singular");
+            .arg(format!("& '..\\tools\\activate.ps1'; vargo build {} --features singular",
+            if release { "--release" } else { "" }));
         debug!("{:?}", cmd);
         cmd.status().unwrap_or_else(|e| {
             error!("Failed to build verus: {}", e);
