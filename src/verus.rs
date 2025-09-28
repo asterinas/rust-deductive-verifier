@@ -172,8 +172,8 @@ pub fn system_crates() -> HashSet<&'static str> {
         "vstd", 
         // "builtin", 
         // "builtin_macros",
-        // "verus_builtin",
-        // "verus_builtin_macros",
+        "verus_builtin",
+        "verus_builtin_macros",
         ])
 }
 
