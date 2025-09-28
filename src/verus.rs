@@ -240,13 +240,28 @@ impl VerusTarget {
         fingerprint::fingerprint_as_str(&content)
     }
 
-    pub fn is_fresh(&self) -> bool {
+    pub fn fingerprint_recursive(&self, all_targets: &HashMap<String, VerusTarget>) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        let content = fingerprint::fingerprint_dir(&self.dir);
+        fingerprint::fingerprint_as_str(&content).hash(&mut hasher);
+        for dep in &self.dependencies {
+            if let Some(dep_target) = all_targets.get(&dep.name) {
+                dep_target.fingerprint_recursive(all_targets).hash(&mut hasher);
+            }
+        }
+        hasher.finish().to_string()
+    }
+
+    pub fn is_fresh(&self, all_targets: &HashMap<String, VerusTarget>) -> bool {
         let ts = self.library_proof_timestamp();
         if !ts.exists() {
             return false;
         }
         let ts_hash = self.load_library_proof_timestamp();
-        let cur_hash = self.fingerprint();
+        let cur_hash = self.fingerprint_recursive(all_targets);
         if cur_hash == ts_hash {
             return true;
         }
@@ -305,9 +320,8 @@ impl VerusTarget {
         String::from_utf8_lossy(&content).to_string()
     }
 
-    pub fn save_library_proof_timestamp(&self) {
-        let content = fingerprint::fingerprint_dir(&self.dir);
-        let content = fingerprint::fingerprint_as_str(&content);
+    pub fn save_library_proof_timestamp(&self, all_targets: &HashMap<String, VerusTarget>) {
+        let content = self.fingerprint_recursive(all_targets);
         files::touch(self.library_proof_timestamp().to_string_lossy().as_ref());
         let mut file = File::create(self.library_proof_timestamp())
             .unwrap_or_else(|e| {
@@ -759,7 +773,7 @@ pub fn compile_target(
             t.rebuilt == true
         });
 
-    if !dep_rebuilt && target.is_fresh() {
+    if !dep_rebuilt && target.is_fresh(&verus_targets()) {
         info!("[Fresh] `{}` is up to date, skipping verification", target.name);
         return Ok(());
     }
@@ -861,7 +875,7 @@ pub fn compile_target(
         );
 
         // success
-        target.save_library_proof_timestamp();
+        target.save_library_proof_timestamp(&verus_targets());
 
         // disassemble the output
         if options.disasm {
