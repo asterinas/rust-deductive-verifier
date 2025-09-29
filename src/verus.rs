@@ -1171,6 +1171,52 @@ pub mod install {
         Ok(())
     }
 
+    fn is_verusfmt_installed() -> bool {
+        let output = Command::new("verusfmt").arg("--version").output();
+        match output {
+            Ok(output) => {
+                if output.status.success() {
+                    return true;
+                }
+            }
+            Err(_) => {}
+        }
+        false
+    }
+
+    fn install_verusfmt() -> Result<(), DynError> {
+        println!("Start to install verusfmt");
+        let status = {
+            #[cfg(target_os = "windows")]
+            {
+                // pwsh -ExecutionPolicy Bypass -c "irm https://github.com/verus-lang/verusfmt/releases/latest/download/verusfmt-installer.ps1 | iex"
+                let mut cmd = get_powershell_command()?;
+                cmd
+                .arg("-ExecutionPolicy")
+                .arg("Bypass")
+                .arg("-c")
+                .arg("irm https://github.com/verus-lang/verusfmt/releases/latest/download/verusfmt-installer.ps1 | iex");
+                println!("{:?}", cmd);
+                cmd.status()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                // curl --proto '=https' --tlsv1.2 -LsSf https://github.com/verus-lang/verusfmt/releases/latest/download/verusfmt-installer.sh | sh
+                let mut cmd = Command::new("bash");
+                cmd
+                .arg("-c")
+                .arg("curl --proto '=https' --tlsv1.2 -LsSf https://github.com/verus-lang/verusfmt/releases/latest/download/verusfmt-installer.sh | sh");
+                println!("{:?}", cmd);
+                cmd.status()
+            }
+        };
+        if let Err(err) = status {
+            eprintln!("Failed to install verusfmt {:?}", err);
+            return Err(err.into());
+        }
+        Ok(())
+    }
+
     #[cfg(target_os = "windows")]
     pub fn build_verus(release:bool) -> Result<(), DynError> {
         let cmd = &mut Command::new("powershell");
@@ -1364,6 +1410,11 @@ pub mod install {
             bootstrap_vscode_extension(options)?;
         }
 
+        // Install Verusfmt
+        if options.restart || !is_verusfmt_installed() {
+            install_verusfmt()?;
+        } 
+
         status!("Verus installation complete");
         Ok(())
     }
@@ -1483,6 +1534,9 @@ pub mod install {
         if options.vscode_extension {
             bootstrap_vscode_extension(options)?;
         }
+
+        // Install Verusfmt
+        install_verusfmt()?;
 
         status!("Verus upgrade complete");
         Ok(())

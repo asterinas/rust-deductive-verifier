@@ -68,7 +68,7 @@ enum Commands {
     ShowItem(ShowItemArgs),
 
     #[command(
-        name = "format",
+        name = "fmt",
         about = "Format the source code of a verification target",
         alias = "f"
     )]
