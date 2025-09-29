@@ -1,5 +1,5 @@
-use std::sync::Once;
 use dotenv::dotenv;
+use std::sync::Once;
 
 pub struct Config {}
 
@@ -28,8 +28,6 @@ impl Config {
         T: std::str::FromStr,
         T::Err: std::fmt::Debug,
     {
-        std::env::var(key)
-            .ok()
-            .and_then(|v| v.parse::<T>().ok())
+        std::env::var(key).ok().and_then(|v| v.parse::<T>().ok())
     }
 }

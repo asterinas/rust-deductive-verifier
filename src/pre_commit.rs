@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use rust_dv::helper::*;
 #[allow(unused_imports)]
 use rust_dv::console::*;
+use rust_dv::helper::*;
+use std::collections::HashMap;
 
 fn main() {
     let targets = verus::verus_targets();
@@ -11,7 +11,7 @@ fn main() {
         .unwrap_or_else(|e| {
             fatal!("Unable to get metadata: {}", e);
         });
-    
+
     let members: HashMap<String, &cargo_metadata::Package> = metadata
         .packages
         .iter()
@@ -21,10 +21,9 @@ fn main() {
     let mut found_errors = false;
     for (vt, t) in targets.iter() {
         let verus_target = t.root_file();
-        let package = members.get(vt)
-            .unwrap_or_else(|| {
-                fatal!("Unable to find target {} in metadata", vt);
-            });
+        let package = members.get(vt).unwrap_or_else(|| {
+            fatal!("Unable to find target {} in metadata", vt);
+        });
 
         let cargo_target = package
             .targets

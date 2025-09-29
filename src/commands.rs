@@ -1,15 +1,15 @@
 use crate::{executable, projects};
 use colored::Colorize;
-use memoize::memoize;
-use std::collections::HashMap;
 use indexmap::IndexMap;
+use memoize::memoize;
+use serde_json::Value;
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use serde_json::Value;
 use std::sync::mpsc;
-use std::thread;
-use std::io::{BufRead, BufReader, Write};
 use std::sync::Arc;
+use std::thread;
 
 use regex::Regex;
 
@@ -33,29 +33,18 @@ pub struct ExecutionResult {
 }
 
 pub fn run_capture(cmd: &mut Command) -> ExecutionResult {
-    cmd.stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     debug!(">> {:?}", cmd);
-    let result = cmd.spawn()
-        .unwrap_or_else(|e| {
-            fatal!(
-                "Unable to spawn command {:?}: {}",
-                cmd,
-                e
-            );
-        });
-    let output = result.wait_with_output()
-        .unwrap_or_else(|e| {
-            fatal!(
-                "Unable to wait for command {:?}: {}",
-                cmd,
-                e
-            );
-        });
+    let result = cmd.spawn().unwrap_or_else(|e| {
+        fatal!("Unable to spawn command {:?}: {}", cmd, e);
+    });
+    let output = result.wait_with_output().unwrap_or_else(|e| {
+        fatal!("Unable to wait for command {:?}: {}", cmd, e);
+    });
     let status = output.status;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    ExecutionResult { 
+    ExecutionResult {
         status,
         stdout,
         stderr,
@@ -63,54 +52,33 @@ pub fn run_capture(cmd: &mut Command) -> ExecutionResult {
 }
 
 pub fn run_panic(cmd: &mut Command) {
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
 
     debug!(">> {:?}", cmd);
     cmd.spawn()
         .unwrap_or_else(|e| {
-            fatal!(
-                "Unable to spawn command {:?}: {}",
-                cmd,
-                e
-            );
+            fatal!("Unable to spawn command {:?}: {}", cmd, e);
         })
         .wait()
         .unwrap_or_else(|e| {
-            fatal!(
-                "Unable to wait for command {:?}: {}",
-                cmd,
-                e
-            );
+            fatal!("Unable to wait for command {:?}: {}", cmd, e);
         });
 }
 
 pub fn run_status(cmd: &mut Command) -> i32 {
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
     debug!(">> {:?}", cmd);
     cmd.spawn()
         .unwrap_or_else(|e| {
-            error!(
-                "Unable to spawn command {:?}: {}",
-                cmd,
-                e
-            );
+            error!("Unable to spawn command {:?}: {}", cmd, e);
         })
         .wait()
         .unwrap_or_else(|e| {
-            error!(
-                "Unable to wait for command {:?}: {}",
-                cmd,
-                e
-            );
+            error!("Unable to wait for command {:?}: {}", cmd, e);
         })
         .code()
         .unwrap_or_else(|| {
-            warn!(
-                "Command {:?} failed to return a status code",
-                cmd
-            );
+            warn!("Command {:?} failed to return a status code", cmd);
             -1
         })
 }
@@ -121,7 +89,7 @@ pub enum StreamType {
     Stderr,
 }
 
-pub fn run_process_capture<F>(cmd: &mut Command, processor: F) -> ExecutionResult 
+pub fn run_process_capture<F>(cmd: &mut Command, processor: F) -> ExecutionResult
 where
     F: Fn(&str, StreamType) + Send + Sync + 'static,
 {
@@ -187,11 +155,9 @@ where
     });
 
     // Wait for the child process to complete
-    let status = child
-        .wait()
-        .unwrap_or_else(|e| {
-            fatal!("Unable to wait for command {:?}: {}", cmd, e);
-        });
+    let status = child.wait().unwrap_or_else(|e| {
+        fatal!("Unable to wait for command {:?}: {}", cmd, e);
+    });
 
     // Wait for threads to finish
     stdout_thread.join().unwrap();
@@ -210,16 +176,14 @@ where
 }
 
 pub fn run_show_capture(cmd: &mut Command) -> ExecutionResult {
-    run_process_capture(cmd, |line, st| {
-        match st {
-            StreamType::Stdout => {
-                println!("{}", line);
-                std::io::stdout().flush().unwrap();
-            },
-            StreamType::Stderr => {
-                eprintln!("{}", line);
-                std::io::stderr().flush().unwrap();
-            },
+    run_process_capture(cmd, |line, st| match st {
+        StreamType::Stdout => {
+            println!("{}", line);
+            std::io::stdout().flush().unwrap();
+        }
+        StreamType::Stderr => {
+            eprintln!("{}", line);
+            std::io::stderr().flush().unwrap();
         }
     })
 }
@@ -244,19 +208,19 @@ pub fn run_build_log_capture(cmd: &mut Command) -> ExecutionResult {
                             .as_str()
                             .and_then(|id| id.split('@').nth(1))
                             .unwrap_or("0.0.0");
-                        println!("  {} {} {}",
+                        println!(
+                            "  {} {} {}",
                             "Compiling".bright_green(),
                             name.bright_black(),
                             version.bright_black()
                         );
                     }
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     })
 }
-
 
 #[derive(Clone, Debug)]
 pub struct DependentLibrary {
@@ -287,7 +251,6 @@ impl Default for CargoBuildExterns {
 }
 
 impl CargoBuildExterns {
-
     pub fn new(deps_ready: bool) -> Self {
         CargoBuildExterns {
             deps_ready,
@@ -313,12 +276,9 @@ impl CargoBuildExterns {
     }
 
     pub fn parse_last_level(&mut self, package: &str, stderr: &str) {
-        let rustc_regex = Regex::new(
-            r"^\s+Running\s+`.*rustc\s+.*--crate-name\s+(\S+)\s+.*$"
-        ).unwrap();
-        let extern_regex = Regex::new(
-            r"--extern\s+([^=\s]+)=([^\s]+)"
-        ).unwrap();
+        let rustc_regex =
+            Regex::new(r"^\s+Running\s+`.*rustc\s+.*--crate-name\s+(\S+)\s+.*$").unwrap();
+        let extern_regex = Regex::new(r"--extern\s+([^=\s]+)=([^\s]+)").unwrap();
 
         for line in stderr.lines() {
             if let Some(caps) = rustc_regex.captures(line) {
@@ -337,81 +297,82 @@ impl CargoBuildExterns {
     }
 
     pub fn parse_library(&mut self, stdout: &str) {
-        for msg in stdout.lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok()) {
-                let reason = msg["reason"].as_str();
-                match &reason {
-                    Some("compiler-artifact") => {
-                        let package_id = msg["package_id"].as_str().unwrap_or_default();
-                        let target = &msg["target"];
-                        let kind: &str = if target["kind"]
-                            .as_array()
-                            .map_or(false, |arr| arr.iter()
-                                .filter_map(|k| k.as_str())
-                                .any(|s| s == "bin")) { "bin" } else { "lib" };
-                        let name = target["name"].as_str().unwrap();
-                        let release = !msg["profile"]["opt_level"]
-                            .as_str()
-                            .map_or(false, |s| s == "0");
-                        let files = msg["filenames"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .filter_map(|f| f.as_str())
-                            .collect::<Vec<_>>();
-                        let lib_path = files.iter()
-                            .find(|f| f.ends_with(".rmeta"))
-                            .or_else(|| files.iter()
-                                .find(|f| f.ends_with(".rlib")))
-                            .or_else(|| files.iter()
-                                .find(|f| f.ends_with(".cdylib")))
-                            .or_else(|| files.iter()
-                                .find(|f| f.ends_with(".so")))
-                            .unwrap_or(&files[0])
-                            .to_string();
-                        let dep = DependentLibrary {
-                            id: package_id.to_string(),
-                            kind: kind.to_string(),
-                            name: name.to_string(),
-                            release,
-                            lib_path: lib_path.to_owned(),
-                        };
-                        self.libraries.insert(lib_path, dep);
-                    },
-                    _ => continue,
+        for msg in stdout
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        {
+            let reason = msg["reason"].as_str();
+            match &reason {
+                Some("compiler-artifact") => {
+                    let package_id = msg["package_id"].as_str().unwrap_or_default();
+                    let target = &msg["target"];
+                    let kind: &str = if target["kind"].as_array().map_or(false, |arr| {
+                        arr.iter().filter_map(|k| k.as_str()).any(|s| s == "bin")
+                    }) {
+                        "bin"
+                    } else {
+                        "lib"
+                    };
+                    let name = target["name"].as_str().unwrap();
+                    let release = !msg["profile"]["opt_level"]
+                        .as_str()
+                        .map_or(false, |s| s == "0");
+                    let files = msg["filenames"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter_map(|f| f.as_str())
+                        .collect::<Vec<_>>();
+                    let lib_path = files
+                        .iter()
+                        .find(|f| f.ends_with(".rmeta"))
+                        .or_else(|| files.iter().find(|f| f.ends_with(".rlib")))
+                        .or_else(|| files.iter().find(|f| f.ends_with(".cdylib")))
+                        .or_else(|| files.iter().find(|f| f.ends_with(".so")))
+                        .unwrap_or(&files[0])
+                        .to_string();
+                    let dep = DependentLibrary {
+                        id: package_id.to_string(),
+                        kind: kind.to_string(),
+                        name: name.to_string(),
+                        release,
+                        lib_path: lib_path.to_owned(),
+                    };
+                    self.libraries.insert(lib_path, dep);
                 }
+                _ => continue,
+            }
         }
     }
 }
 
-
 /// Run `cargo build` for the given package to resolve dependencies.
 /// The dependencies are required to be successfully built.
 /// But the package itself is not required to be built.
-pub fn cargo_build_resolve_deps(package: &str, env: &HashMap<String, String>, release: bool) -> CargoBuildExterns {
+pub fn cargo_build_resolve_deps(
+    package: &str,
+    env: &HashMap<String, String>,
+    release: bool,
+) -> CargoBuildExterns {
     let mut cmd = Command::new("cargo");
     for (env_key, env_value) in env {
         cmd.env(env_key, env_value);
     }
 
-    cmd
-        .arg("build")
+    cmd.arg("build")
         .arg("--verbose")
         .arg("--keep-going")
-        .arg("--package").arg(package)
-        .arg("--message-format").arg("json-render-diagnostics");
+        .arg("--package")
+        .arg(package)
+        .arg("--message-format")
+        .arg("json-render-diagnostics");
     if release {
         cmd.arg("--release");
     }
 
     let res = run_build_log_capture(&mut cmd);
-    CargoBuildExterns::parse_from_build_log(
-        package, 
-        res.stdout.as_str(), 
-        res.stderr.as_str()
-    )
+    CargoBuildExterns::parse_from_build_log(package, res.stdout.as_str(), res.stderr.as_str())
 }
-
 
 pub fn cargo_build(package: &str, env: &HashMap<String, String>, release: bool) {
     let mut cmd = Command::new("cargo");
@@ -419,9 +380,7 @@ pub fn cargo_build(package: &str, env: &HashMap<String, String>, release: bool) 
         cmd.env(env_key, env_value);
     }
 
-    cmd
-        .arg("build")
-        .arg("--package").arg(package);
+    cmd.arg("build").arg("--package").arg(package);
     if release {
         cmd.arg("--release");
     }
@@ -432,8 +391,10 @@ pub fn cargo_build(package: &str, env: &HashMap<String, String>, release: bool) 
 pub fn cargo_build_with_manifest(package: &str, manifest: &str, bin: &[&str], release: bool) {
     let mut cmd = Command::new("cargo");
     cmd.arg("build")
-        .arg("--manifest-path").arg(manifest)
-        .arg("--package").arg(package);
+        .arg("--manifest-path")
+        .arg(manifest)
+        .arg("--package")
+        .arg(package);
 
     if release {
         cmd.arg("--release");
@@ -448,7 +409,6 @@ pub fn cargo_build_with_manifest(package: &str, manifest: &str, bin: &[&str], re
     }
     run_panic(&mut cmd);
 }
-
 
 #[cfg(target_os = "windows")]
 const RUSTFILT_BIN: &str = "rustfilt.exe";
@@ -540,22 +500,16 @@ pub fn apply_patch(dir: &Path, patch: &Path) {
 pub fn get_dummy_rustc(release: bool) -> PathBuf {
     let dummy = projects::get_dummy_rustc(release);
     let dummy_dir = dummy.parent().unwrap();
-    let dummy_rustc = executable::locate(
-        "dummy-rustc",
-        None,
-        &[dummy_dir]
-    );
+    let dummy_rustc = executable::locate("dummy-rustc", None, &[dummy_dir]);
 
-    let manifest = projects::get_root()
-        .join("xtask")
-        .join("Cargo.toml");
+    let manifest = projects::get_root().join("xtask").join("Cargo.toml");
 
     if dummy_rustc.is_none() {
-        cargo_build_with_manifest (
+        cargo_build_with_manifest(
             "xtask",
             manifest.to_str().unwrap(),
             &["dummy-rustc"],
-            release
+            release,
         );
     }
 

@@ -1,24 +1,27 @@
+use crate::config::Config;
 #[allow(unused_imports)]
 pub use colored::Colorize;
-use std::sync::Once;
-use crate::config::Config;
 use log;
 use log::Record;
 use log4rs::{
     self,
-     append::{
-        console::ConsoleAppender, 
-        rolling_file::{policy::compound::{
-            roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger, CompoundPolicy
-        }, 
-        RollingFileAppender},
+    append::{
+        console::ConsoleAppender,
+        rolling_file::{
+            policy::compound::{
+                roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger, CompoundPolicy,
+            },
+            RollingFileAppender,
+        },
     },
-     config::Appender, 
-     encode::{json::JsonEncoder, pattern::PatternEncoder, writer::simple::SimpleWriter, Encode, Write}
+    config::Appender,
+    encode::{
+        json::JsonEncoder, pattern::PatternEncoder, writer::simple::SimpleWriter, Encode, Write,
+    },
 };
+use std::sync::Once;
 
-
-pub struct Console{}
+pub struct Console {}
 static CONSOLE_INIT: Once = Once::new();
 
 #[derive(Debug, Clone)]
@@ -68,9 +71,7 @@ impl Encode for TruncateEncoder {
 
 fn init_console() {
     CONSOLE_INIT.call_once(|| {
-        let max_width = Config::new()
-            .get("LOG_MAX_CONSOLE_WIDTH")
-            .unwrap_or(320);
+        let max_width = Config::new().get("LOG_MAX_CONSOLE_WIDTH").unwrap_or(320);
         let console = ConsoleAppender::builder()
             .encoder(Box::new(TruncateEncoder::new(max_width)))
             .build();
@@ -93,11 +94,10 @@ fn init_console() {
                 log4rs::config::Root::builder()
                     .appender("console")
                     .appender("json")
-                    .build(log::LevelFilter::Debug)
+                    .build(log::LevelFilter::Debug),
             )
             .unwrap();
         log4rs::init_config(config).unwrap();
-
     });
 }
 
@@ -188,4 +188,3 @@ macro_rules! warn {
                 .warn(&format!($($arg)*));
         }
     }
-

@@ -4,10 +4,7 @@ use proc_macro2::{Delimiter, TokenTree};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use syn::{
-    Attribute, Field, Fields, File, GenericArgument, Item,
-    ItemStruct, Type, Visibility,
-};
+use syn::{Attribute, Field, Fields, File, GenericArgument, Item, ItemStruct, Type, Visibility};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -178,7 +175,6 @@ impl Rule {
     }
 }
 
-
 pub struct Parser {
     pub package_path: PathBuf,
     pub asts: HashMap<PathBuf, File>,
@@ -237,7 +233,12 @@ impl Parser {
     pub fn parse(&mut self) -> &Self {
         for (path, ast) in self.asts.clone() {
             let mut module_path = path.to_str().unwrap_or("").to_string();
-            let src_path = self.package_path.join("src").to_str().unwrap_or("").to_string();
+            let src_path = self
+                .package_path
+                .join("src")
+                .to_str()
+                .unwrap_or("")
+                .to_string();
             module_path = module_path.replace(&src_path, "");
             module_path = module_path.trim_start_matches('/').replace('/', "::");
             // Remove .rs extension
@@ -267,11 +268,14 @@ impl Parser {
     }
 
     // Helper method to expand verus macro
-    fn expand_verus_macro(&self, tokens: &proc_macro2::TokenStream) -> Option<proc_macro2::TokenStream> {
+    fn expand_verus_macro(
+        &self,
+        tokens: &proc_macro2::TokenStream,
+    ) -> Option<proc_macro2::TokenStream> {
         // Extract only the struct definitions and convert them to standard Rust syntax
         let mut expanded = Vec::new();
         let mut token_iter = tokens.clone().into_iter().peekable();
-        
+
         while let Some(token) = token_iter.next() {
             match &token {
                 TokenTree::Ident(ident) => {
@@ -336,7 +340,8 @@ impl Parser {
                 TokenTree::Group(group) => {
                     // Recursively process group contents
                     if let Some(processed_stream) = self.expand_verus_macro(&group.stream()) {
-                        let new_group = proc_macro2::Group::new(group.delimiter(), processed_stream);
+                        let new_group =
+                            proc_macro2::Group::new(group.delimiter(), processed_stream);
                         expanded.push(TokenTree::Group(new_group));
                     } else {
                         expanded.push(token);
@@ -347,12 +352,15 @@ impl Parser {
                 }
             }
         }
-        
+
         Some(proc_macro2::TokenStream::from_iter(expanded))
     }
 
     // Helper method to skip spec content (functions, blocks, etc.)
-    fn skip_spec_content(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) {
+    fn skip_spec_content(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) {
         let mut depth = 0;
         while let Some(token) = token_iter.next() {
             match token {
@@ -374,25 +382,33 @@ impl Parser {
     }
 
     // Helper method to check if an impl block contains spec functions
-    fn is_spec_impl_block(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) -> bool {
+    fn is_spec_impl_block(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) -> bool {
         let mut temp_iter = token_iter.clone();
-        
+
         // Skip to the opening brace
         while let Some(token) = temp_iter.next() {
             if let TokenTree::Group(group) = token {
                 if group.delimiter() == Delimiter::Brace {
                     // Check if the content contains spec functions
                     let content = group.stream().to_string();
-                    return content.contains("spec") || content.contains("open") || content.contains("recommends");
+                    return content.contains("spec")
+                        || content.contains("open")
+                        || content.contains("recommends");
                 }
             }
         }
-        
+
         false
     }
 
     // Helper method to skip an entire impl block
-    fn skip_impl_block(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) {
+    fn skip_impl_block(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) {
         let mut depth = 0;
         while let Some(token) = token_iter.next() {
             match token {
@@ -411,7 +427,10 @@ impl Parser {
     }
 
     // Helper method to skip macro calls
-    fn skip_macro_call(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) {
+    fn skip_macro_call(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) {
         while let Some(token) = token_iter.next() {
             match token {
                 TokenTree::Group(_) => {
@@ -428,7 +447,10 @@ impl Parser {
     }
 
     // Helper method to skip until semicolon
-    fn skip_until_semicolon(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) {
+    fn skip_until_semicolon(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) {
         while let Some(token) = token_iter.next() {
             if let TokenTree::Punct(punct) = token {
                 if punct.as_char() == ';' {
@@ -442,7 +464,7 @@ impl Parser {
     fn parse_individual_items(&self, tokens: &proc_macro2::TokenStream) -> Option<Vec<Item>> {
         let mut items = Vec::new();
         let mut token_iter = tokens.clone().into_iter().peekable();
-        
+
         while let Some(token) = token_iter.peek() {
             match token {
                 TokenTree::Ident(ident) => {
@@ -450,7 +472,8 @@ impl Parser {
                     match ident_str.as_str() {
                         "struct" => {
                             // Try to parse a struct definition
-                            if let Some(struct_tokens) = self.extract_struct_tokens(&mut token_iter) {
+                            if let Some(struct_tokens) = self.extract_struct_tokens(&mut token_iter)
+                            {
                                 match syn::parse2::<syn::ItemStruct>(struct_tokens) {
                                     Ok(item_struct) => {
                                         items.push(Item::Struct(item_struct));
@@ -478,12 +501,14 @@ impl Parser {
                             // Look ahead to see what comes after pub
                             let mut temp_iter = token_iter.clone();
                             temp_iter.next(); // consume "pub"
-                            
+
                             if let Some(TokenTree::Ident(next_ident)) = temp_iter.peek() {
                                 let next_str = next_ident.to_string();
                                 match next_str.as_str() {
                                     "struct" => {
-                                        if let Some(struct_tokens) = self.extract_struct_tokens(&mut token_iter) {
+                                        if let Some(struct_tokens) =
+                                            self.extract_struct_tokens(&mut token_iter)
+                                        {
                                             match syn::parse2::<syn::ItemStruct>(struct_tokens) {
                                                 Ok(item_struct) => {
                                                     items.push(Item::Struct(item_struct));
@@ -495,7 +520,9 @@ impl Parser {
                                         }
                                     }
                                     "enum" => {
-                                        if let Some(enum_tokens) = self.extract_enum_tokens(&mut token_iter) {
+                                        if let Some(enum_tokens) =
+                                            self.extract_enum_tokens(&mut token_iter)
+                                        {
                                             match syn::parse2::<syn::ItemEnum>(enum_tokens) {
                                                 Ok(item_enum) => {
                                                     items.push(Item::Enum(item_enum));
@@ -527,7 +554,7 @@ impl Parser {
                 }
             }
         }
-        
+
         if items.is_empty() {
             None
         } else {
@@ -536,13 +563,16 @@ impl Parser {
     }
 
     // Helper method to extract struct tokens
-    fn extract_struct_tokens(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) -> Option<proc_macro2::TokenStream> {
+    fn extract_struct_tokens(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) -> Option<proc_macro2::TokenStream> {
         let mut struct_tokens = Vec::new();
         let mut found_struct = false;
-        
+
         while let Some(token) = token_iter.next() {
             struct_tokens.push(token.clone());
-            
+
             match &token {
                 TokenTree::Ident(ident) if ident.to_string() == "struct" => {
                     found_struct = true;
@@ -560,7 +590,7 @@ impl Parser {
                 _ => {}
             }
         }
-        
+
         if found_struct {
             Some(proc_macro2::TokenStream::from_iter(struct_tokens))
         } else {
@@ -569,13 +599,16 @@ impl Parser {
     }
 
     // Helper method to extract enum tokens
-    fn extract_enum_tokens(&self, token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>) -> Option<proc_macro2::TokenStream> {
+    fn extract_enum_tokens(
+        &self,
+        token_iter: &mut std::iter::Peekable<proc_macro2::token_stream::IntoIter>,
+    ) -> Option<proc_macro2::TokenStream> {
         let mut enum_tokens = Vec::new();
         let mut found_enum = false;
-        
+
         while let Some(token) = token_iter.next() {
             enum_tokens.push(token.clone());
-            
+
             match &token {
                 TokenTree::Ident(ident) if ident.to_string() == "enum" => {
                     found_enum = true;
@@ -589,7 +622,7 @@ impl Parser {
                 _ => {}
             }
         }
-        
+
         if found_enum {
             Some(proc_macro2::TokenStream::from_iter(enum_tokens))
         } else {
@@ -611,24 +644,26 @@ impl Parser {
                             return true;
                         }
                     }
-                },
+                }
                 Item::Macro(m) => {
-                    if m.mac.path.segments.len() > 0 &&
-                       m.mac.path.segments[0].ident == "verus" {
+                    if m.mac.path.segments.len() > 0 && m.mac.path.segments[0].ident == "verus" {
                         if let Some(expanded_tokens) = self.expand_verus_macro(&m.mac.tokens) {
-                            
                             // Try to parse as a complete file first
                             match syn::parse2::<File>(expanded_tokens.clone()) {
                                 Ok(file) => {
-                                    let stop = self.parse_items(module_path.to_string(), &file.items);
+                                    let stop =
+                                        self.parse_items(module_path.to_string(), &file.items);
                                     if stop {
                                         return true;
                                     }
                                 }
                                 Err(_) => {
                                     // Try to parse individual items from the token stream
-                                    if let Some(parsed_items) = self.parse_individual_items(&expanded_tokens) {
-                                        let stop = self.parse_items(module_path.to_string(), &parsed_items);
+                                    if let Some(parsed_items) =
+                                        self.parse_individual_items(&expanded_tokens)
+                                    {
+                                        let stop = self
+                                            .parse_items(module_path.to_string(), &parsed_items);
                                         if stop {
                                             return true;
                                         }
@@ -637,7 +672,7 @@ impl Parser {
                             }
                         }
                     }
-                },
+                }
                 _ => {}
             }
         }
@@ -844,4 +879,3 @@ impl Parser {
         }
     }
 }
-

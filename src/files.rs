@@ -1,9 +1,8 @@
-use std::{env, path};
-use std::path::{Path, PathBuf};
-use std::fs;
-use touch::file;
 use crate::helper::{error, fatal};
-
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::{env, path};
+use touch::file;
 
 pub fn absolutize<P: AsRef<Path>>(path: &P) -> PathBuf {
     if path.as_ref().is_absolute() {
@@ -23,30 +22,37 @@ pub fn dir_as_package(dir: &str) -> String {
 }
 
 pub fn touch(path: &str) {
-    file::write(path, "", false)
-        .unwrap_or_else(|e| {
-            error!("Unable to create file {:?}: {}", path, e);
-        });
+    file::write(path, "", false).unwrap_or_else(|e| {
+        error!("Unable to create file {:?}: {}", path, e);
+    });
 }
 
-pub fn modify_time<P>(path: P) -> std::time::SystemTime 
-    where
-        P: AsRef<Path>,
+pub fn modify_time<P>(path: P) -> std::time::SystemTime
+where
+    P: AsRef<Path>,
 {
     fs::metadata(&path)
         .unwrap_or_else(|e| {
-            fatal!("Unable to get metadata for file {:?}: {}", path.as_ref().display(), e);
+            fatal!(
+                "Unable to get metadata for file {:?}: {}",
+                path.as_ref().display(),
+                e
+            );
         })
         .modified()
         .unwrap_or_else(|e| {
-            fatal!("Unable to get modified time for file {:?}: {}", path.as_ref().display(), e);
+            fatal!(
+                "Unable to get modified time for file {:?}: {}",
+                path.as_ref().display(),
+                e
+            );
         })
 }
 
-pub fn newer<P, Q>(a: P, b: Q) -> bool 
-    where
-        P: AsRef<Path>,
-        Q: AsRef<Path>,
+pub fn newer<P, Q>(a: P, b: Q) -> bool
+where
+    P: AsRef<Path>,
+    Q: AsRef<Path>,
 {
     let ma = modify_time(a);
     let mb = modify_time(b);

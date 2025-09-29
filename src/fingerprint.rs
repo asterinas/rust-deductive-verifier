@@ -1,7 +1,7 @@
+use blake3::Hasher;
+use rayon::prelude::*;
 use std::{fs::File, io::Read, path::PathBuf};
 use walkdir::WalkDir;
-use rayon::prelude::*;
-use blake3::Hasher;
 
 type Hash = [u8; 32];
 
@@ -43,4 +43,3 @@ pub fn fingerprint_dir(root: &PathBuf) -> Hash {
 pub fn fingerprint_as_str(hash: &Hash) -> String {
     hex::encode(hash)
 }
-

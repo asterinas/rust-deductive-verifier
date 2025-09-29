@@ -1,7 +1,7 @@
-use std::{fs, path::PathBuf, process::Command};
-use serde::{Serialize, Deserialize};
-use std::collections::HashSet;
 use colored::Colorize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::{fs, path::PathBuf, process::Command};
 
 use crate::commands;
 
@@ -18,20 +18,23 @@ struct Toolchain {
 
 impl ToolchainConfig {
     pub fn load(toml: &PathBuf) -> Self {
-        let contents = fs::read_to_string(toml)
-            .unwrap_or_else(|e| 
-                panic!("Failed to read toolchain config file `{:?}`: {:?}", toml, e));
-        toml::from_str(&contents)
-            .unwrap_or_else(|e| 
-                panic!("Failed to parse toolchain config file `{:?}`: {:?}", toml, e))
+        let contents = fs::read_to_string(toml).unwrap_or_else(|e| {
+            panic!("Failed to read toolchain config file `{:?}`: {:?}", toml, e)
+        });
+        toml::from_str(&contents).unwrap_or_else(|e| {
+            panic!(
+                "Failed to parse toolchain config file `{:?}`: {:?}",
+                toml, e
+            )
+        })
     }
 }
-
 
 pub fn load_toolchain(toml: &PathBuf) -> String {
     let cfg = ToolchainConfig::load(toml);
     let channel = &cfg.toolchain.channel;
-    let components = cfg.toolchain
+    let components = cfg
+        .toolchain
         .components
         .as_ref()
         .map(Vec::as_slice)
@@ -51,21 +54,19 @@ pub fn sync_toolchain(src: &PathBuf, dst: &PathBuf) {
         needs_to_save = true;
     }
 
-    let src_components = src_cfg.toolchain
+    let src_components = src_cfg
+        .toolchain
         .components
         .unwrap_or(Vec::new())
         .iter()
         .map(String::to_string)
         .collect::<HashSet<_>>();
 
-    let dst_components = dst_cfg.toolchain
+    let dst_components = dst_cfg
+        .toolchain
         .components
         .as_ref()
-        .map(|c| 
-            c.iter()
-                .map(String::to_string)
-                .collect::<HashSet<_>>()
-        )
+        .map(|c| c.iter().map(String::to_string).collect::<HashSet<_>>())
         .unwrap_or(HashSet::new());
 
     let extra_components: Vec<String> = src_components
@@ -77,7 +78,11 @@ pub fn sync_toolchain(src: &PathBuf, dst: &PathBuf) {
         if dst_cfg.toolchain.components.is_none() {
             dst_cfg.toolchain.components = Some(Vec::new());
         }
-        dst_cfg.toolchain.components.as_mut().unwrap()
+        dst_cfg
+            .toolchain
+            .components
+            .as_mut()
+            .unwrap()
             .extend(extra_components);
         needs_to_save = true;
     }
@@ -85,32 +90,30 @@ pub fn sync_toolchain(src: &PathBuf, dst: &PathBuf) {
     // save the updated configuration to `dst` toml file
     if needs_to_save {
         let dst_updated = toml::to_string_pretty(&dst_cfg)
-            .unwrap_or_else(|e| 
-                panic!("Failed to serialize toolchain config: {:?}", e));
-        fs::write(dst, dst_updated)
-            .unwrap_or_else(|e| 
-                panic!("Failed to write toolchain config file `{:?}`: {:?}", dst, e));
-        info!("{}: {}",
+            .unwrap_or_else(|e| panic!("Failed to serialize toolchain config: {:?}", e));
+        fs::write(dst, dst_updated).unwrap_or_else(|e| {
+            panic!("Failed to write toolchain config file `{:?}`: {:?}", dst, e)
+        });
+        info!(
+            "{}: {}",
             "Workspace toolchain updated!".green(),
             "You need to run `cargo update` to apply changes.".yellow()
         );
     }
 }
 
-
 pub fn install_toolchain(channel: &str) {
     let cmd = &mut Command::new("rustup");
-    cmd
-        .args(["toolchain", "list"]);
+    cmd.args(["toolchain", "list"]);
     let installed = commands::run_capture(cmd);
-    let xs = installed.stdout
+    let xs = installed
+        .stdout
         .lines()
         .filter(|line| line.contains(channel))
         .collect::<Vec<_>>();
     if xs.is_empty() {
         let cmd = &mut Command::new("rustup");
-        cmd
-            .args(["toolchain", "install", channel]);
+        cmd.args(["toolchain", "install", channel]);
         commands::run_panic(cmd);
     } else {
         debug!("Toolchain {} is already installed.", channel);
@@ -123,12 +126,9 @@ pub fn install_components(channel: &str, components: &[String]) {
     }
 
     let cmd = &mut Command::new("rustup");
-    cmd
-        .args(["component", "list", "--installed", "--toolchain", channel]);
+    cmd.args(["component", "list", "--installed", "--toolchain", channel]);
     let installed = commands::run_capture(cmd);
-    let installed_components: Vec<_> = installed.stdout
-        .lines()
-        .collect();
+    let installed_components: Vec<_> = installed.stdout.lines().collect();
     let mut to_install: Vec<String> = Vec::new();
     for c in components {
         if !installed_components.iter().any(|line| line.starts_with(c)) {
@@ -137,8 +137,7 @@ pub fn install_components(channel: &str, components: &[String]) {
     }
     if !to_install.is_empty() {
         let cmd = &mut Command::new("rustup");
-        cmd
-            .args(["component", "add", "--toolchain", channel])
+        cmd.args(["component", "add", "--toolchain", channel])
             .args(&to_install);
         commands::run_panic(cmd);
     }

@@ -1,11 +1,10 @@
 use crate::{generator::Generative, helper::*};
 use anyhow::Error;
-use serde::{Serialize, Deserialize, de::Error as DeError};
-use std::collections::HashMap;
-use toml::Value;
 use askama::Template;
+use serde::{de::Error as DeError, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ops::Deref;
-
+use toml::Value;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct VerifyDeps {
@@ -19,7 +18,6 @@ pub struct DependencyConfig {
 }
 
 impl VerifyDeps {
-
     pub fn empty() -> Self {
         VerifyDeps {
             dependencies: HashMap::new(),
@@ -27,40 +25,32 @@ impl VerifyDeps {
     }
 
     pub fn load() -> Self {
-        let path = projects::get_root()
-            .join("verify.deps.toml");
+        let path = projects::get_root().join("verify.deps.toml");
         if !path.exists() {
             warn!("No `verify.deps.toml` found in the workspace!");
             return Self::empty();
         }
 
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| {
-                warn!("Unable to read file {:?}: {}", path.display(), e);
-                String::new()
-            });
+        let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            warn!("Unable to read file {:?}: {}", path.display(), e);
+            String::new()
+        });
 
-        let deps = VerifyDeps::extract(&content)
-            .unwrap_or_else(|e| {
-                warn!("Unable to parse `verify.deps.toml`: {}", e);
-                HashMap::new()
-            });
+        let deps = VerifyDeps::extract(&content).unwrap_or_else(|e| {
+            warn!("Unable to parse `verify.deps.toml`: {}", e);
+            HashMap::new()
+        });
 
-        Self {
-            dependencies: deps,
-        }
+        Self { dependencies: deps }
     }
 
-    pub fn extract(content: &str) -> Result<
-        HashMap<String, String>, 
-        toml::de::Error
-    > {
+    pub fn extract(content: &str) -> Result<HashMap<String, String>, toml::de::Error> {
         let mut deps: HashMap<String, String> = HashMap::new();
 
         let r: Value = content.parse()?;
         if let Value::Table(t) = r {
             if let Some(Value::Table(d)) = t.get("dependencies") {
-                    for (name, config) in d.iter() {
+                for (name, config) in d.iter() {
                     // Convert the config value to its string representation
                     let config_str = config.to_string();
                     deps.insert(name.clone(), config_str);
@@ -73,7 +63,6 @@ impl VerifyDeps {
         Ok(deps)
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub struct Package {
@@ -96,7 +85,7 @@ impl Deref for CargoTomlTemplate {
     }
 }
 
-impl Generative for CargoTomlTemplate { }
+impl Generative for CargoTomlTemplate {}
 
 #[derive(Template)]
 #[template(path = "lib.rs.j2")]
@@ -112,7 +101,7 @@ impl Deref for LibTemplate {
     }
 }
 
-impl Generative for LibTemplate { }
+impl Generative for LibTemplate {}
 
 #[derive(Template)]
 #[template(path = ".dummy.rs.j2")]
@@ -128,7 +117,7 @@ impl Deref for DummyRsTemplate {
     }
 }
 
-impl Generative for DummyRsTemplate { }
+impl Generative for DummyRsTemplate {}
 
 impl Package {
     pub fn new(name: &str) -> Self {
@@ -139,18 +128,11 @@ impl Package {
         }
     }
 
-    pub fn take_dependencies(
-        &mut self,
-        deps: VerifyDeps,
-    ) -> &Self {
-        let ds: Vec<DependencyConfig> = deps.dependencies
+    pub fn take_dependencies(&mut self, deps: VerifyDeps) -> &Self {
+        let ds: Vec<DependencyConfig> = deps
+            .dependencies
             .into_iter()
-            .map(|(name, config)| {
-                DependencyConfig {
-                    name,
-                    config,
-                }
-            })
+            .map(|(name, config)| DependencyConfig { name, config })
             .collect();
 
         self.dependencies = ds;
@@ -159,42 +141,38 @@ impl Package {
 
     pub fn populate(&self) -> Result<(), Error> {
         // Create the package directory
-        let p_dir = projects::get_root()
-            .join("verification")
-            .join(&self.name);
+        let p_dir = projects::get_root().join("verification").join(&self.name);
         if p_dir.exists() {
             error!("Package directory {:?} already exists!", p_dir.display());
         }
 
-        std::fs::create_dir_all(&p_dir)
-            .map_err(|e| Error::msg(format!(
+        std::fs::create_dir_all(&p_dir).map_err(|e| {
+            Error::msg(format!(
                 "Unable to create package directory {:?}: {}",
-                p_dir.display(), e
-            )))?;
+                p_dir.display(),
+                e
+            ))
+        })?;
 
         // Create the Cargo.toml file
-        let cargo_tmpl = CargoTomlTemplate {
-            c: self.clone(),
-        };
+        let cargo_tmpl = CargoTomlTemplate { c: self.clone() };
         cargo_tmpl.save_as(&p_dir.join("Cargo.toml"));
 
         // Create the src directory
-        std::fs::create_dir_all(p_dir.join("src"))
-            .map_err(|e| Error::msg(format!(
+        std::fs::create_dir_all(p_dir.join("src")).map_err(|e| {
+            Error::msg(format!(
                 "Unable to create src directory {:?}: {}",
-                p_dir.join("src").display(), e
-            )))?;
-        
+                p_dir.join("src").display(),
+                e
+            ))
+        })?;
+
         // Create the src/lib.rs file
-        let lib_tmpl = LibTemplate {
-            c: self.clone(),
-        };
+        let lib_tmpl = LibTemplate { c: self.clone() };
         lib_tmpl.save_as(&p_dir.join("src").join("lib.rs"));
 
         // Create the src/.dummy.rs file
-        let dummy_tmpl = DummyRsTemplate {
-            c: self.clone(),
-        };
+        let dummy_tmpl = DummyRsTemplate { c: self.clone() };
         dummy_tmpl.save_as(&p_dir.join("src").join(".dummy.rs"));
 
         // Update the workspace Cargo.toml to include the new package
@@ -207,13 +185,11 @@ impl Package {
 pub fn create(name: &str) -> Package {
     let mut package = Package::new(name);
 
-    package
-        .take_dependencies(VerifyDeps::load());
+    package.take_dependencies(VerifyDeps::load());
 
-    package.populate()
-        .unwrap_or_else(|e| {
-            error!("Unable to populate package {}: {}", name, e);
-        });
+    package.populate().unwrap_or_else(|e| {
+        error!("Unable to populate package {}: {}", name, e);
+    });
 
     package
 }

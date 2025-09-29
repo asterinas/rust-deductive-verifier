@@ -48,8 +48,7 @@ impl CargoTree {
             }
             let line = line.unwrap();
             let depth: usize = line.name("depth").unwrap().as_str().parse().unwrap();
-            let name = line.name("name").unwrap().as_str()
-                .replace("-", "_");
+            let name = line.name("name").unwrap().as_str().replace("-", "_");
             let version = line.name("version").map(|m| m.as_str());
             let info = line.name("info").map(|m| m.as_str());
             let node = CargoNode {
@@ -134,4 +133,3 @@ impl CargoTree {
         });
     }
 }
-

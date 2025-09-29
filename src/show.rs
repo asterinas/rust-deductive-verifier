@@ -1,10 +1,7 @@
 use crate::{parser::*, verus::DynError};
 use std::result::Result;
 
-pub fn find_struct_in_package(
-    package: &str,
-    r#struct: &str,
-) -> Result<Vec<StructInfo>, DynError> {
+pub fn find_struct_in_package(package: &str, r#struct: &str) -> Result<Vec<StructInfo>, DynError> {
     let mut parser = Parser::new(package);
     parser
         .load()
@@ -12,15 +9,13 @@ pub fn find_struct_in_package(
         .parse();
 
     if parser.output.is_empty() {
-        return Err(format!(
-            "No struct definitions found for '{}'",
-            r#struct
-        ).into());
+        return Err(format!("No struct definitions found for '{}'", r#struct).into());
     }
 
-    let out: Result<Vec<StructInfo>, String> = parser.output
+    let out: Result<Vec<StructInfo>, String> = parser
+        .output
         .iter()
-        .map(|item|{
+        .map(|item| {
             item.downcast_ref::<StructInfo>()
                 .ok_or_else(|| format!("Expected StructInfo, found {:?}", item))
                 .cloned()
@@ -28,6 +23,4 @@ pub fn find_struct_in_package(
         .collect();
 
     Ok(out?)
-
 }
-

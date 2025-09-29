@@ -185,7 +185,7 @@ struct DocArgs {
 #[derive(Parser, Debug)]
 struct CompileArgs {
     #[arg(
-        short = 't', 
+        short = 't',
         long = "targets",
         value_parser = verus::find_target,
         help = "The targets to compile",

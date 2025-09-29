@@ -1,13 +1,12 @@
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 
 use project_root::get_project_root;
 
 pub fn get_root() -> PathBuf {
     match get_project_root() {
         Ok(path) => path,
-        Err(_) => env::current_dir()
-            .expect("Failed to find the project root!"),
+        Err(_) => env::current_dir().expect("Failed to find the project root!"),
     }
 }
 

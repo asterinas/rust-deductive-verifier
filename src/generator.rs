@@ -1,11 +1,9 @@
-use askama::Template;
 use crate::files;
-use std::path::Path;
-use std::io::Write;
-use std::time::SystemTime;
 use crate::helper::{error, info};
-
-
+use askama::Template;
+use std::io::Write;
+use std::path::Path;
+use std::time::SystemTime;
 
 pub struct CrateInfo {
     pub name: String,
@@ -20,30 +18,25 @@ pub struct ExternCratesTemplate {
 
 impl Generative for ExternCratesTemplate {}
 
-
 pub trait Generative: Template {
     fn generate(&self) -> String {
-        self.render()
-            .unwrap_or_else(|e| {
-                error!("Unable to render template: {}", e);
-            })
+        self.render().unwrap_or_else(|e| {
+            error!("Unable to render template: {}", e);
+        })
     }
 
     fn save_as(&self, path: &Path) {
         let content = self.generate();
         let path = files::absolutize(&path);
-        let mut file = std::fs::File::create(&path)
-            .unwrap_or_else(|e| {
-                error!("Unable to create file {:?}: {}", path.display(), e);
-            });
-        file.write_all(content.as_bytes())
-            .unwrap_or_else(|e| {
-                error!("Unable to write to file {:?}: {}", path.display(), e);
-            });
-        file.flush()
-            .unwrap_or_else(|e| {
-                error!("Unable to flush file {:?}: {}", path.display(), e);
-            });
+        let mut file = std::fs::File::create(&path).unwrap_or_else(|e| {
+            error!("Unable to create file {:?}: {}", path.display(), e);
+        });
+        file.write_all(content.as_bytes()).unwrap_or_else(|e| {
+            error!("Unable to write to file {:?}: {}", path.display(), e);
+        });
+        file.flush().unwrap_or_else(|e| {
+            error!("Unable to flush file {:?}: {}", path.display(), e);
+        });
 
         info!("Generated file: {:?}", path.display());
     }
@@ -68,17 +61,18 @@ pub trait Generative: Template {
             .append(true)
             .open(path)
             .unwrap_or_else(|e| {
-                error!("Unable to open file {:?} for appending: {}", path.display(), e);
+                error!(
+                    "Unable to open file {:?} for appending: {}",
+                    path.display(),
+                    e
+                );
             });
-        file.write_all(content.as_bytes())
-            .unwrap_or_else(|e| {
-                error!("Unable to write to file {:?}: {}", path.display(), e);
-            });
-        file.flush()
-            .unwrap_or_else(|e| {
-                error!("Unable to flush file {:?}: {}", path.display(), e);
-            });
+        file.write_all(content.as_bytes()).unwrap_or_else(|e| {
+            error!("Unable to write to file {:?}: {}", path.display(), e);
+        });
+        file.flush().unwrap_or_else(|e| {
+            error!("Unable to flush file {:?}: {}", path.display(), e);
+        });
         info!("Appended to file: {:?}", path.display());
     }
-
 }

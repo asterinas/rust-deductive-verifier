@@ -1,39 +1,35 @@
-use std::fs;
-use serde::{Serialize, Deserialize};
-use std::path::Path;
-use std::collections::HashMap;
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
 use crate::commands::CargoBuildExterns;
 
-
 pub fn deserialize<P: AsRef<Path>, T>(path: P) -> T
-    where T: serde::de::DeserializeOwned
+where
+    T: serde::de::DeserializeOwned,
 {
-    let content = fs::read_to_string(&path)
-        .unwrap_or_else(|e| {
-            fatal!("Unable to read file {:?}: {}", path.as_ref(), e);
-        });
-    let res: T = toml::from_str(&content)
-        .unwrap_or_else(|e| {
-            fatal!("Unable to parse file {:?}: {}", path.as_ref(), e);
-        });
+    let content = fs::read_to_string(&path).unwrap_or_else(|e| {
+        fatal!("Unable to read file {:?}: {}", path.as_ref(), e);
+    });
+    let res: T = toml::from_str(&content).unwrap_or_else(|e| {
+        fatal!("Unable to parse file {:?}: {}", path.as_ref(), e);
+    });
     res
 }
 
 pub fn serialize<P: AsRef<Path>, T>(path: P, data: &T)
-    where T: Serialize
+where
+    T: Serialize,
 {
-    let content = toml::to_string_pretty(data)
-        .unwrap_or_else(|e| {
-            fatal!("Unable to serialize data: {}", e);
-        });
-    fs::write(&path, content)
-        .unwrap_or_else(|e| {
-            fatal!("Unable to write file {:?}: {}", path.as_ref(), e);
-        });
+    let content = toml::to_string_pretty(data).unwrap_or_else(|e| {
+        fatal!("Unable to serialize data: {}", e);
+    });
+    fs::write(&path, content).unwrap_or_else(|e| {
+        fatal!("Unable to write file {:?}: {}", path.as_ref(), e);
+    });
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Dependencies {
@@ -71,7 +67,9 @@ impl Dependencies {
         let mut renamed = IndexMap::new();
 
         // path -> alias of the package name
-        let reverse_map: HashMap<String, String> = self.externs.iter()
+        let reverse_map: HashMap<String, String> = self
+            .externs
+            .iter()
             .map(|(k, v)| (v.clone(), k.clone()))
             .collect();
 

@@ -4,8 +4,8 @@ use rust_dv::helper::*;
 mod tests {
     use super::*;
     use std::env;
-    use std::path::{PathBuf, Path};
     use std::fs::File;
+    use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use tempfile::TempDir;
 
@@ -35,9 +35,7 @@ mod tests {
     fn push_path(path: &Path) {
         let env_path = env::var("PATH").ok();
         PATH_CTX.lock().unwrap().push(env_path.clone());
-        let mut paths = env::split_paths(
-            &env_path.unwrap_or_default()
-        ).collect::<Vec<_>>();
+        let mut paths = env::split_paths(&env_path.unwrap_or_default()).collect::<Vec<_>>();
         paths.push(PathBuf::from(path));
         let updated_path = env::join_paths(paths).unwrap();
         env::set_var("PATH", &updated_path);
@@ -73,10 +71,7 @@ mod tests {
         let (bin_dir, tmp_exec) = create_tmp_exec();
         let paths = vec![bin_dir.path()];
 
-        let res = executable::locate_from_hints(
-            &T_EXEC,
-            paths.as_slice(),
-        );
+        let res = executable::locate_from_hints(&T_EXEC, paths.as_slice());
 
         assert!(res.is_some(), "Executable not found in hints");
         let path: PathBuf = res.unwrap();
@@ -102,13 +97,10 @@ mod tests {
 
     #[test]
     fn test_get_dependency() {
-
         let all = verus::verus_targets();
         assert!(!all.is_empty(), "No targets found");
 
-        let x = all
-            .get("empty")
-            .unwrap();
+        let x = all.get("empty").unwrap();
         verus::resolve_deps_cached(x, true);
     }
 
@@ -116,7 +108,5 @@ mod tests {
     fn test_new_package() {
         let p = new::create("test-package");
         println!("{:?}", p);
-
     }
 }
-

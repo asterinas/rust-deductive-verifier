@@ -1,4 +1,5 @@
 use colored::Colorize;
+use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
@@ -7,15 +8,16 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use indexmap::IndexMap;
 
 use cargo_metadata;
 use cargo_metadata::CrateType;
 
 use crate::commands::CargoBuildExterns;
-use crate::{commands, executable, files, projects, serialization, generator, dep_tree, fingerprint};
 use crate::generator::Generative;
 use crate::projects::get_root;
+use crate::{
+    commands, dep_tree, executable, files, fingerprint, generator, projects, serialization,
+};
 
 pub type DynError = Box<dyn std::error::Error>;
 
@@ -79,12 +81,17 @@ pub fn get_verus(release: bool) -> PathBuf {
 #[memoize]
 pub fn get_rust_verify(release: bool) -> PathBuf {
     executable::locate(
-            RUST_VERIFY,
-            None,
-            if release { &[VERUS_HINT_RELEASE] } else {&[VERUS_HINT]},
-        ).unwrap_or_else(|| {
-            error!("Cannot find the Verus `rust_verify` binary.");
-        })
+        RUST_VERIFY,
+        None,
+        if release {
+            &[VERUS_HINT_RELEASE]
+        } else {
+            &[VERUS_HINT]
+        },
+    )
+    .unwrap_or_else(|| {
+        error!("Cannot find the Verus `rust_verify` binary.");
+    })
 }
 
 #[memoize]
@@ -145,10 +152,10 @@ pub fn system_crates() -> HashSet<&'static str> {
     HashSet::from([
         "build-script-build",
         "borsh",
-        "vstd", 
+        "vstd",
         "verus_builtin",
         "verus_builtin_macros",
-        ])
+    ])
 }
 
 #[cfg(target_os = "linux")]
@@ -157,10 +164,10 @@ pub fn system_crates() -> HashSet<&'static str> {
     HashSet::from([
         "build-script-build",
         "borsh",
-        "vstd", 
+        "vstd",
         "verus_builtin",
         "verus_builtin_macros",
-        ])
+    ])
 }
 
 #[cfg(target_os = "macos")]
@@ -169,12 +176,12 @@ pub fn system_crates() -> HashSet<&'static str> {
     HashSet::from([
         "build-script-build",
         "borsh",
-        "vstd", 
-        // "builtin", 
+        "vstd",
+        // "builtin",
         // "builtin_macros",
         "verus_builtin",
         "verus_builtin_macros",
-        ])
+    ])
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -249,7 +256,9 @@ impl VerusTarget {
         fingerprint::fingerprint_as_str(&content).hash(&mut hasher);
         for dep in &self.dependencies {
             if let Some(dep_target) = all_targets.get(&dep.name) {
-                dep_target.fingerprint_recursive(all_targets).hash(&mut hasher);
+                dep_target
+                    .fingerprint_recursive(all_targets)
+                    .hash(&mut hasher);
             }
         }
         hasher.finish().to_string()
@@ -306,11 +315,10 @@ impl VerusTarget {
         let content = File::open(self.library_proof_timestamp())
             .map(|mut f| {
                 let mut content = Vec::<u8>::new();
-                f.read_to_end(&mut content)
-                    .unwrap_or_else(|e| {
-                        warn!("Failed to read library proof timestamp: {}", e);
-                        0
-                    });
+                f.read_to_end(&mut content).unwrap_or_else(|e| {
+                    warn!("Failed to read library proof timestamp: {}", e);
+                    0
+                });
                 content
             })
             .unwrap_or_else(|e| {
@@ -323,14 +331,12 @@ impl VerusTarget {
     pub fn save_library_proof_timestamp(&self, all_targets: &HashMap<String, VerusTarget>) {
         let content = self.fingerprint_recursive(all_targets);
         files::touch(self.library_proof_timestamp().to_string_lossy().as_ref());
-        let mut file = File::create(self.library_proof_timestamp())
-            .unwrap_or_else(|e| {
-                error!("Failed to create library proof timestamp: {}", e);
-            });
-        file.write_all(content.as_bytes())
-            .unwrap_or_else(|e| {
-                error!("Failed to write library proof timestamp: {}", e);
-            });
+        let mut file = File::create(self.library_proof_timestamp()).unwrap_or_else(|e| {
+            error!("Failed to create library proof timestamp: {}", e);
+        });
+        file.write_all(content.as_bytes()).unwrap_or_else(|e| {
+            error!("Failed to write library proof timestamp: {}", e);
+        });
     }
 
     pub fn library_path(&self) -> PathBuf {
@@ -358,12 +364,12 @@ fn extract_dependencies(package: &cargo_metadata::Package) -> Vec<VerusDependenc
 }
 
 fn extract_features(
-    package: &cargo_metadata::Package, 
-    workspace_features: &[String]
+    package: &cargo_metadata::Package,
+    workspace_features: &[String],
 ) -> Vec<String> {
     let mut features: HashSet<String> = HashSet::new();
     features.extend(workspace_features.iter().map(|s| s.to_string()));
-    
+
     // level-traverse of the feature tree
     let mut q = vec!["default"];
     q.extend(workspace_features.iter().map(|s| s.as_str()));
@@ -382,7 +388,8 @@ fn extract_features(
 }
 
 pub fn workspace_features(name: &str, metadata: &cargo_metadata::Metadata) -> Vec<String> {
-    metadata.workspace_metadata
+    metadata
+        .workspace_metadata
         .get(name)
         .and_then(|v| v.get("features"))
         .and_then(|v| v.as_array())
@@ -395,7 +402,6 @@ pub fn workspace_features(name: &str, metadata: &cargo_metadata::Metadata) -> Ve
         })
         .unwrap_or_else(Vec::new)
 }
-
 
 #[memoize]
 pub fn verus_targets() -> HashMap<String, VerusTarget> {
@@ -432,7 +438,9 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
             continue;
         }
 
-        let target_file = package.metadata.get("verus")
+        let target_file = package
+            .metadata
+            .get("verus")
             .and_then(|v| v.get("path"))
             .and_then(|v| v.as_str());
 
@@ -449,27 +457,22 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
             } else {
                 CrateType::Lib
             };
-            let file = dir.clone()
-                .join(
-                    target_file.unwrap_or(match crate_type {
-                        CrateType::Bin => "src/main.rs",
-                        _ => "src/lib.rs",
-                    })
-                );
+            let file = dir.clone().join(target_file.unwrap_or(match crate_type {
+                CrateType::Bin => "src/main.rs",
+                _ => "src/lib.rs",
+            }));
 
             let deps = extract_dependencies(package);
 
-            let gen_lifetime = package.metadata.get("verus")
+            let gen_lifetime = package
+                .metadata
+                .get("verus")
                 .and_then(|v| v.get("check_lifetime"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
 
-
             let ws_features = workspace_features(&name, &metadata);
-            let features = extract_features(
-                package,
-                ws_features.as_slice()
-            );
+            let features = extract_features(package, ws_features.as_slice());
 
             targets.insert(
                 name.clone(),
@@ -543,7 +546,10 @@ pub fn get_dependent_targets(target: &VerusTarget, release: bool) -> IndexMap<St
     deps
 }
 
-pub fn get_dependent_targets_batch(targets: &[VerusTarget], release: bool) -> IndexMap<String, VerusTarget> {
+pub fn get_dependent_targets_batch(
+    targets: &[VerusTarget],
+    release: bool,
+) -> IndexMap<String, VerusTarget> {
     let mut deps = IndexMap::new();
     for target in targets.iter() {
         deps.extend(get_local_dependency(target));
@@ -558,8 +564,7 @@ pub fn get_dependent_targets_batch(targets: &[VerusTarget], release: bool) -> In
 }
 
 pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<String, String> {
-    let externs = resolve_deps_cached(target, release)
-        .renamed_full_externs();
+    let externs = resolve_deps_cached(target, release).renamed_full_externs();
 
     let mut deps = IndexMap::new();
 
@@ -630,44 +635,30 @@ pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError>
 
 pub fn cmd_push_externs(cmd: &mut Command, externs: &IndexMap<String, String>) {
     for (name, path) in externs.iter() {
-        cmd.arg("--extern")
-            .arg(format!("{}={}", name, path));
+        cmd.arg("--extern").arg(format!("{}={}", name, path));
     }
 }
 
-pub fn reorder_deps(
-    target: &VerusTarget,
-    deps: &mut CargoBuildExterns,
-) {
+pub fn reorder_deps(target: &VerusTarget, deps: &mut CargoBuildExterns) {
     let raw = dep_tree::cargo_tree(&target.name);
     let tree = dep_tree::CargoTree::parse(&raw);
     let rank = tree.rank();
-    let rk = |x: &String| -> usize {
-        *rank.get(x).unwrap_or(&usize::MAX)
-    };
+    let rk = |x: &String| -> usize { *rank.get(x).unwrap_or(&usize::MAX) };
 
-    deps.last_level.sort_by(
-        |a, _, b, _| {
-            rk(a).cmp(&rk(b))
-        }
-    );
+    deps.last_level.sort_by(|a, _, b, _| rk(a).cmp(&rk(b)));
 
-    deps.libraries.sort_by(
-        |_, a, _, b| {
-            let a = a.name.replace('-', "_");
-            let b = b.name.replace('-', "_");
-            rk(&a).cmp(&rk(&b))
-        }
-    )
+    deps.libraries.sort_by(|_, a, _, b| {
+        let a = a.name.replace('-', "_");
+        let b = b.name.replace('-', "_");
+        rk(&a).cmp(&rk(&b))
+    })
 }
 
-pub fn resolve_deps(target: &VerusTarget, release: bool) -> CargoBuildExterns
-{
+pub fn resolve_deps(target: &VerusTarget, release: bool) -> CargoBuildExterns {
     let dummy_rs = target.dir.join("src").join(".dummy.rs");
     files::touch(&dummy_rs.to_string_lossy());
 
-    let mut externs = commands::cargo_build_resolve_deps(
-            &target.name, &HashMap::new(), release);
+    let mut externs = commands::cargo_build_resolve_deps(&target.name, &HashMap::new(), release);
 
     if externs.deps_ready {
         reorder_deps(target, &mut externs);
@@ -695,11 +686,11 @@ pub fn resolve_deps_cached(target: &VerusTarget, release: bool) -> serialization
 
 pub fn gen_extern_crates(target: &VerusTarget, release: bool) {
     let externs = resolve_deps_cached(target, release);
-    let mut tmpl = generator::ExternCratesTemplate {
-        crates: Vec::new(),
-    };
+    let mut tmpl = generator::ExternCratesTemplate { crates: Vec::new() };
 
-    let local_deps = target.dependencies.iter()
+    let local_deps = target
+        .dependencies
+        .iter()
         .filter(|dep| dep.path.is_some())
         .map(|dep| dep.name.replace('-', "_"))
         .collect::<HashSet<_>>();
@@ -760,21 +751,18 @@ pub fn compile_target(
             error!("Error creating target directory: {}", e);
         });
     }
-    let deps_dir = out_dir
-        .join(get_build_dir(options.release))
-        .join("deps");
-    
+    let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
+
     prepare(target, options.release);
 
     let mut deps = get_local_dependency(target);
-    let dep_rebuilt = deps.values()
-        .into_iter()
-        .any(|t| {
-            t.rebuilt == true
-        });
+    let dep_rebuilt = deps.values().into_iter().any(|t| t.rebuilt == true);
 
     if !dep_rebuilt && target.is_fresh(&verus_targets()) {
-        info!("[Fresh] `{}` is up to date, skipping verification", target.name);
+        info!(
+            "[Fresh] `{}` is up to date, skipping verification",
+            target.name
+        );
         return Ok(());
     }
 
@@ -817,7 +805,7 @@ pub fn compile_target(
     if options.log {
         cmd.arg("--log-all");
     }
-    
+
     if options.trace {
         cmd.env("RUST_BACKTRACE", "full");
         cmd.arg("--trace");
@@ -845,10 +833,10 @@ pub fn compile_target(
         .arg("-C")
         .arg(format!("metadata={}", target.name));
 
-        for feature in target.features.iter() {
-            cmd.args(["--cfg", &format!("feature=\"{}\"", feature)]);
-        }
-        cmd.stdout(Stdio::inherit());
+    for feature in target.features.iter() {
+        cmd.args(["--cfg", &format!("feature=\"{}\"", feature)]);
+    }
+    cmd.stdout(Stdio::inherit());
 
     info!(
         "  {} {} {}",
@@ -888,10 +876,7 @@ pub fn compile_target(
     }
 
     // failure
-    Err(format!(
-        "Error during compilation: `{}`",
-        target.name,
-    ).into())
+    Err(format!("Error during compilation: `{}`", target.name,).into())
 }
 
 pub fn exec_verify(
@@ -906,16 +891,16 @@ pub fn exec_verify(
         .map(|target| (target.name.clone(), target.clone()))
         .collect::<IndexMap<_, _>>();
     let out_dir = get_target_dir();
-    let deps_dir = out_dir
-        .join(get_build_dir(options.release))
-        .join("deps");
+    let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
 
     let extended_targets = get_dependent_targets_batch(targets, options.release);
     for target in extended_targets.values() {
-        compile_target(target, &vec![], options)
-            .unwrap_or_else(|e| {
-                error!("Unable to build the dependent proof: `{}` ({})", target.name, e);
-            });
+        compile_target(target, &vec![], options).unwrap_or_else(|e| {
+            error!(
+                "Unable to build the dependent proof: `{}` ({})",
+                target.name, e
+            );
+        });
     }
 
     let ts_start = Instant::now();
@@ -1018,7 +1003,6 @@ pub fn exec_verify(
     Ok(())
 }
 
-
 pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     let objdump = commands::get_objdump();
     let cmd = &mut Command::new(&objdump);
@@ -1038,10 +1022,7 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
         .stdout(Stdio::piped())
         .spawn()?;
 
-    let mut disasm = File::create(format!(
-        "{}.S",
-        target.library_path().display()
-    ))?;
+    let mut disasm = File::create(format!("{}.S", target.library_path().display()))?;
 
     let mut out = status.stdout.take().unwrap_or_else(|| {
         error!("Error during disassembly: {:?}", rustfilt);
@@ -1054,7 +1035,6 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     Ok(())
 }
 
-
 pub fn exec_compile(
     targets: &[VerusTarget],
     imports: &[VerusTarget],
@@ -1062,10 +1042,12 @@ pub fn exec_compile(
 ) -> Result<(), DynError> {
     let extended_targets = get_dependent_targets_batch(targets, options.release);
     for target in extended_targets.values() {
-        compile_target(target, &[], options)
-            .unwrap_or_else(|e| {
-                error!("Unable to build the dependent proof: `{}` ({})", target.name, e);
-            });
+        compile_target(target, &[], options).unwrap_or_else(|e| {
+            error!(
+                "Unable to build the dependent proof: `{}` ({})",
+                target.name, e
+            );
+        });
     }
 
     // remove the targets that has been compiled
@@ -1086,9 +1068,8 @@ pub fn exec_compile(
 
 pub mod install {
     use super::*;
-    use git2::Repository;
     use crate::toolchain;
-
+    use git2::Repository;
 
     pub struct VerusInstallOpts {
         pub restart: bool,
@@ -1159,7 +1140,7 @@ pub mod install {
         let z3 = verus_source_dir().join("z3");
         if !z3.exists() {
             info!("Z3 not found, downloading...");
-            Command::new("bash")   
+            Command::new("bash")
                 .current_dir(verus_source_dir())
                 .arg("-c")
                 .arg("./tools/get-z3.sh")
@@ -1218,12 +1199,12 @@ pub mod install {
     }
 
     #[cfg(target_os = "windows")]
-    pub fn build_verus(release:bool) -> Result<(), DynError> {
+    pub fn build_verus(release: bool) -> Result<(), DynError> {
         let cmd = &mut Command::new("powershell");
-        cmd.current_dir(verus_source_dir())
-            .arg("/c")
-            .arg(format!("& '..\\tools\\activate.ps1'; vargo build {} --features singular",
-            if release { "--release" } else { "" }));
+        cmd.current_dir(verus_source_dir()).arg("/c").arg(format!(
+            "& '..\\tools\\activate.ps1'; vargo build {} --features singular",
+            if release { "--release" } else { "" }
+        ));
         debug!("{:?}", cmd);
         cmd.status().unwrap_or_else(|e| {
             error!("Failed to build verus: {}", e);
@@ -1234,8 +1215,7 @@ pub mod install {
 
     #[cfg(not(target_os = "windows"))]
     pub fn build_verus(release: bool) -> Result<(), DynError> {
-        let toolchain = verus_dir()
-            .join("rust-toolchain.toml");
+        let toolchain = verus_dir().join("rust-toolchain.toml");
         let toolchain_name = toolchain::load_toolchain(&toolchain);
 
         let cmd = &mut Command::new("bash");
@@ -1243,7 +1223,8 @@ pub mod install {
             .env_remove("RUSTUP_TOOLCHAIN")
             .env("RUSTUP_TOOLCHAIN", toolchain_name)
             .arg("-c")
-            .arg(format!("source ../tools/activate; vargo build {} --features singular",
+            .arg(format!(
+                "source ../tools/activate; vargo build {} --features singular",
                 if release { "--release" } else { "" }
             ));
         debug!("{:?}", cmd);
@@ -1413,7 +1394,7 @@ pub mod install {
         // Install Verusfmt
         if options.restart || !is_verusfmt_installed() {
             install_verusfmt()?;
-        } 
+        }
 
         status!("Verus installation complete");
         Ok(())

@@ -1,5 +1,5 @@
-use std::process::{Command, Stdio};
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 pub fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
@@ -22,9 +22,7 @@ pub fn main() {
     let mut cmd = Command::new("rustc");
     cmd.args(args);
 
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
 
-    cmd.spawn().unwrap()
-        .wait().unwrap();
+    cmd.spawn().unwrap().wait().unwrap();
 }
