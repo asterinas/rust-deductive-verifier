@@ -1147,7 +1147,8 @@ pub mod install {
         let z3 = verus_source_dir().join("z3.exe");
         if !z3.exists() {
             info!("Z3 not found, downloading...");
-            Command::new("powershell")
+            let mut cmd = executable::get_powershell_command()?;
+            cmd
                 .current_dir(verus_source_dir())
                 .arg("/c")
                 .arg(".\\tools\\get-z3.ps1")
@@ -1195,7 +1196,7 @@ pub mod install {
             #[cfg(target_os = "windows")]
             {
                 // pwsh -ExecutionPolicy Bypass -c "irm https://github.com/verus-lang/verusfmt/releases/latest/download/verusfmt-installer.ps1 | iex"
-                let mut cmd = get_powershell_command()?;
+                let mut cmd = executable::get_powershell_command()?;
                 cmd
                 .arg("-ExecutionPolicy")
                 .arg("Bypass")
@@ -1224,7 +1225,7 @@ pub mod install {
 
     #[cfg(target_os = "windows")]
     pub fn build_verus(release: bool) -> Result<(), DynError> {
-        let cmd = &mut Command::new("powershell");
+        let mut cmd = executable::get_powershell_command()?;
         cmd.current_dir(verus_source_dir()).arg("/c").arg(format!(
             "& '..\\tools\\activate.ps1'; vargo build {} --features singular",
             if release { "--release" } else { "" }
@@ -1261,7 +1262,7 @@ pub mod install {
 
     #[cfg(target_os = "windows")]
     pub fn build_vscode_extension() -> Result<(), DynError> {
-        let cmd = &mut Command::new("powershell");
+        let mut cmd = executable::get_powershell_command()?;
         cmd.current_dir(verus_analyzer_dir())
             .env_remove("RUSTUP_TOOLCHAIN")
             .arg("/c")
@@ -1293,7 +1294,7 @@ pub mod install {
 
     #[cfg(target_os = "windows")]
     pub fn pack_vscode_extension() -> Result<(), DynError> {
-        let cmd = &mut Command::new("powershell");
+        let mut cmd = executable::get_powershell_command()?;
         cmd.current_dir(verus_analyzer_dir())
                 .arg("-Command")
                 .arg("Get-ChildItem -Path './dist' -Filter 'verus-analyzer*.zip' | Expand-Archive -DestinationPath './dist' -Force");

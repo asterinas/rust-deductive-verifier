@@ -1,6 +1,8 @@
 use crate::files;
+use colored::Colorize;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub fn locate_from_path<P>(binary: &P) -> Option<PathBuf>
 where
@@ -67,4 +69,43 @@ where
         .or_else(|| locate_from_path(binary));
 
     path.map(|path| files::absolutize(&path))
+}
+
+// On Windows, prefer pwsh if available, otherwise fall back to powershell.
+#[cfg(target_os = "windows")]
+pub fn get_powershell_command() -> std::io::Result<Command> {
+    let check_pwsh = Command::new("pwsh")
+        .arg("/?")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    if matches!(check_pwsh, Ok(status) if status.success()) {
+        return Ok(Command::new("pwsh"));
+    }
+
+    let check_ps = Command::new("powershell")
+        .arg("/?")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    if matches!(check_ps, Ok(status) if status.success()) {
+        eprintln!(
+            "{}",
+            "Warning: Using powershell.exe (Windows PowerShell 5.x).".yellow()
+        );
+        eprintln!(
+            "{}",
+            "If you encounter errors related to `Get‑ExecutionPolicy` or \
+            failure loading the `Microsoft.PowerShell.Security` module, please \
+            try using `pwsh` (PowerShell 7 or later) instead.".yellow()
+        );
+        return Ok(Command::new("powershell"));
+    }
+
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "No working PowerShell version found",
+    ))
 }
