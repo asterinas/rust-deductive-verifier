@@ -168,6 +168,15 @@ struct VerifyArgs {
         allow_hyphen_values = true
     )]
     pass_through: Vec<String>,
+
+    #[arg(
+        short = 'c',
+        long = "count-line",
+        help = "Count the number of lines of code",
+        default_value = "false",
+        action = ArgAction::SetTrue
+    )]
+    count_line: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -249,6 +258,15 @@ struct CompileArgs {
         allow_hyphen_values = true
     )]
     pass_through: Vec<String>,
+
+    #[arg(
+        short = 'c',
+        long = "count-line",
+        help = "Count the number of lines of code",
+        default_value = "false",
+        action = ArgAction::SetTrue
+    )]
+    count_line: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -371,6 +389,7 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         trace: args.trace,
         disasm: false,
         pass_through: args.pass_through.clone(),
+        count_line: args.count_line,
     };
 
     verus::exec_verify(&targets, &imports, &options)
@@ -404,6 +423,7 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         release: !args.debug,
         disasm: args.disasm,
         pass_through: args.pass_through.clone(),
+        count_line: args.count_line,
     };
 
     verus::exec_compile(&targets, &imports, &options)

@@ -2,6 +2,7 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs::{self, File};
 use std::hash::Hash;
 use std::io::{Read, Write};
@@ -228,6 +229,8 @@ pub struct ExtraOptions {
     pub disasm: bool,
     /// pass-through options to the verifier
     pub pass_through: Vec<String>,
+    /// count lines of code
+    pub count_line: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -957,6 +960,9 @@ pub fn exec_verify(
             cmd.env("RUST_BACKTRACE", "full");
             cmd.arg("--trace");
         }
+        if options.count_line {
+            cmd.arg("--emit=dep-info");
+        }
 
         // input file
         let target_file = target.root_file();
@@ -998,6 +1004,24 @@ pub fn exec_verify(
                 target.version.white(),
                 duration.as_secs_f64()
             );
+        }
+
+        if options.count_line {
+            let root = get_root();
+            let verus_root = root.join("tools").join("verus");
+            let line_count_dir = verus_root.join("source/tools/line_count");
+            let dependency_file = env::current_dir()?.join("lib.d");
+            env::set_current_dir(&line_count_dir)?;
+            let mut cargo_cmd = Command::new("cargo");
+            cargo_cmd
+                .arg("run")
+                .arg("--release")
+                .arg(&dependency_file)
+                .arg("-p");
+
+            println!("Counting lines for target: {}", target.name);
+            cargo_cmd.status()?;
+            fs::remove_file(&dependency_file)?;
         }
     }
     Ok(())
