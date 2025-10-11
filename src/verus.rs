@@ -1148,8 +1148,7 @@ pub mod install {
         if !z3.exists() {
             info!("Z3 not found, downloading...");
             let mut cmd = executable::get_powershell_command()?;
-            cmd
-                .current_dir(verus_source_dir())
+            cmd.current_dir(verus_source_dir())
                 .arg("/c")
                 .arg(".\\tools\\get-z3.ps1")
                 .status()
