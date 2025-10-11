@@ -99,7 +99,8 @@ pub fn get_powershell_command() -> std::io::Result<Command> {
             "{}",
             "If you encounter errors related to `Get‑ExecutionPolicy` or \
             failure loading the `Microsoft.PowerShell.Security` module, please \
-            try using `pwsh` (PowerShell 7 or later) instead.".yellow()
+            try using `pwsh` (PowerShell 7 or later) instead."
+                .yellow()
         );
         return Ok(Command::new("powershell"));
     }
