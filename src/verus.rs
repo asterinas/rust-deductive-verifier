@@ -1098,11 +1098,9 @@ pub mod install {
     pub struct VerusInstallOpts {
         pub restart: bool,
         pub release: bool,
-        pub vscode_extension: bool,
     }
 
     pub const VERUS_REPO: &str = "https://github.com/verus-lang/verus.git";
-    pub const VERUS_ANALYZER_REPO: &str = "https://github.com/verus-lang/verus-analyzer.git";
 
     #[memoize]
     pub fn tools_dir() -> PathBuf {
@@ -1259,121 +1257,6 @@ pub mod install {
         Ok(())
     }
 
-    #[cfg(target_os = "windows")]
-    pub fn build_vscode_extension() -> Result<(), DynError> {
-        let mut cmd = executable::get_powershell_command()?;
-        cmd.current_dir(verus_analyzer_dir())
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .arg("/c")
-            .args(["cargo", "xtask", "dist"]);
-
-        debug!(">> {:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verus-analyzer: {}", e);
-        });
-        status!("Verus Analyzer build complete");
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub fn build_vscode_extension() -> Result<(), DynError> {
-        let cmd = &mut Command::new("bash");
-        cmd.current_dir(verus_analyzer_dir())
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .arg("-c")
-            .args(["cargo", "xtask", "dist"]);
-
-        debug!("{:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verus-analyzer: {}", e);
-        });
-        status!("Verus Analyzer build complete");
-        Ok(())
-    }
-
-    #[cfg(target_os = "windows")]
-    pub fn pack_vscode_extension() -> Result<(), DynError> {
-        let mut cmd = executable::get_powershell_command()?;
-        cmd.current_dir(verus_analyzer_dir())
-                .arg("-Command")
-                .arg("Get-ChildItem -Path './dist' -Filter 'verus-analyzer*.zip' | Expand-Archive -DestinationPath './dist' -Force");
-
-        debug!(">> {:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to pack verus-analyzer: {}", e);
-            std::process::exit(1);
-        });
-        status!("Verus Analyzer pack complete");
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub fn pack_vscode_extension() -> Result<(), DynError> {
-        let cmd = &mut Command::new("bash");
-        cmd.current_dir(verus_analyzer_dir()).arg("-c").args([
-            "gnuzip",
-            "./dist/verus-analyzer*.gz",
-            "&&",
-            "chmod",
-            "u+x",
-            "./dist/verus-analyzer*",
-        ]);
-
-        debug!("{:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to pack verus-analyzer: {}", e);
-        });
-        status!("Verus Analyzer pack complete");
-        Ok(())
-    }
-
-    pub fn bootstrap_vscode_extension(options: &VerusInstallOpts) -> Result<(), DynError> {
-        let dir = verus_analyzer_dir();
-        if options.restart && dir.exists() {
-            status!("Removing old verus-analyzer installation...");
-            std::fs::remove_dir_all(&dir)?;
-        }
-
-        if !dir.exists() {
-            status!(
-                "Cloning Verus Analyzer repo {} to {} ...",
-                VERUS_ANALYZER_REPO,
-                dir.display()
-            );
-            Repository::clone(VERUS_ANALYZER_REPO, &dir).unwrap_or_else(|e| {
-                error!("Failed to clone verus-analyzer repo: {}", e);
-            });
-        }
-
-        let patch = tools_patch_dir().join("verus-analyzer-fixes.patch");
-        if !commands::is_patch_applied(&dir, &patch) {
-            status!(
-                "Applying patch {} to {} ...",
-                patch.display(),
-                dir.display()
-            );
-            commands::apply_patch(&dir, &patch);
-        }
-
-        status!("Building Verus Analyzer ...");
-        build_vscode_extension()?;
-
-        status!("Packing Verus Analyzer ...");
-        pack_vscode_extension()?;
-
-        let gz = fs::read_dir(verus_analyzer_dir().join("dist"))
-            .unwrap()
-            .next()
-            .unwrap()
-            .unwrap_or_else(|e| {
-                error!("Unable to find verus-analyzer dist directory: {}", e);
-            })
-            .path();
-
-        status!("Verus Analyzer build complete: {}", gz.display());
-        Ok(())
-    }
-
     pub fn exec_bootstrap(options: &VerusInstallOpts) -> Result<(), DynError> {
         let verus_dir = verus_dir();
 
@@ -1409,11 +1292,6 @@ pub mod install {
             &verus_dir.join("rust-toolchain.toml"),
             &projects::get_root().join("rust-toolchain.toml"),
         );
-
-        // Install VSCode extension
-        if options.vscode_extension {
-            bootstrap_vscode_extension(options)?;
-        }
 
         // Install Verusfmt
         if options.restart || !is_verusfmt_installed() {
@@ -1534,11 +1412,6 @@ pub mod install {
             &verus_dir.join("rust-toolchain.toml"),
             &projects::get_root().join("rust-toolchain.toml"),
         );
-
-        // Install VSCode extension
-        if options.vscode_extension {
-            bootstrap_vscode_extension(options)?;
-        }
 
         // Install Verusfmt
         install_verusfmt()?;

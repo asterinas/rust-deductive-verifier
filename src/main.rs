@@ -78,13 +78,6 @@ enum Commands {
 #[derive(Parser, Debug)]
 struct BootstrapArgs {
     #[arg(
-        long = "vscode-extension",
-        help = "Build verus vscode extension",
-        default_value = "false", 
-        action = ArgAction::SetTrue)]
-    vscode_extension: bool,
-
-    #[arg(
         long = "restart", 
         help = "Remove all toolchain and restart the bootstrap",
         default_value = "false", 
@@ -401,7 +394,6 @@ fn doc(_args: &DocArgs) -> Result<(), DynError> {
 
 fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
     let options = verus::install::VerusInstallOpts {
-        vscode_extension: args.vscode_extension,
         release: !args.debug,
         restart: args.restart,
     };
