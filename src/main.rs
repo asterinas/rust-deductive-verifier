@@ -99,6 +99,12 @@ struct BootstrapArgs {
         action = ArgAction::SetTrue
     )]
     debug: bool,
+
+    #[arg(long = "test_branch", 
+        help = "Use the test branch of our Verus fork for testing",
+        default_value = "false", 
+        action = ArgAction::SetTrue)]
+    test_branch: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -396,6 +402,11 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
     let options = verus::install::VerusInstallOpts {
         release: !args.debug,
         restart: args.restart,
+        branch: if args.test_branch {
+            Some("update-test".into())
+        } else {
+            None
+        },
     };
 
     if args.upgrade {
