@@ -139,8 +139,7 @@ pub fn get_target_dir() -> PathBuf {
 
 #[memoize]
 pub fn get_verus_target_dir() -> PathBuf {
-    let root = get_root();
-    let verus_dir = root.join("tools").join("verus");
+    let verus_dir = install::verus_dir();
     verus_dir
         .join("source")
         .join("target-verus")
@@ -1007,8 +1006,7 @@ pub fn exec_verify(
         }
 
         if options.count_line {
-            let root = get_root();
-            let verus_root = root.join("tools").join("verus");
+            let verus_root = install::verus_dir();
             let line_count_dir = verus_root.join("source/tools/line_count");
             let dependency_file = env::current_dir()?.join("lib.d");
             env::set_current_dir(&line_count_dir)?;
@@ -1120,11 +1118,6 @@ pub mod install {
     #[memoize]
     pub fn tools_patch_dir() -> PathBuf {
         tools_dir().join("patches")
-    }
-
-    #[memoize]
-    pub fn verus_analyzer_dir() -> PathBuf {
-        tools_dir().join("verus-analyzer")
     }
 
     pub fn clone_repo(verus_dir: &Path) -> Result<(), DynError> {
