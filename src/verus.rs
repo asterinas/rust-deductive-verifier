@@ -1096,6 +1096,7 @@ pub mod install {
     pub struct VerusInstallOpts {
         pub restart: bool,
         pub release: bool,
+        pub branch: Option<String>,
     }
 
     pub const VERUS_REPO: &str = "https://github.com/asterinas/verus.git";
@@ -1253,6 +1254,10 @@ pub mod install {
     pub fn exec_bootstrap(options: &VerusInstallOpts) -> Result<(), DynError> {
         let verus_dir = verus_dir();
 
+        if options.branch.is_some() {
+            error!("Specifying a branch is only supported during upgrade.");
+        }
+
         if options.restart && verus_dir.exists() {
             info!("Removing old verus installation...");
             std::fs::remove_dir_all(&verus_dir)?;
@@ -1295,7 +1300,7 @@ pub mod install {
         Ok(())
     }
 
-    pub fn git_pull(dir: &Path) -> Result<(), DynError> {
+    pub fn git_pull(dir: &Path, branch: Option<&str>) -> Result<(), DynError> {
         let repo = Repository::open(dir).unwrap_or_else(|e| {
             error!(
                 "Unable to find the git repo of verus under {}: {}",
@@ -1304,9 +1309,12 @@ pub mod install {
             );
         });
 
-        // Find the remote and fetch all branches
+        // Determine target branch (default to "main")
+        let target_branch = branch.unwrap_or("main");
+
+        // Find the remote and fetch the target branch
         let mut remote = repo.find_remote("origin")?;
-        remote.fetch(&["main"], None, None)?; // Fetch all branches
+        remote.fetch(&[target_branch], None, None)?;
 
         // Get the current branch
         let head = repo.head()?;
@@ -1318,7 +1326,7 @@ pub mod install {
         let local_commit = head.peel_to_commit()?;
 
         // Find the matching remote branch
-        let upstream_branch = format!("refs/remotes/origin/{}", branch_name);
+        let upstream_branch = format!("refs/remotes/origin/{}", target_branch);
         let upstream_ref = repo.find_reference(&upstream_branch)?;
         let upstream_commit = upstream_ref.peel_to_commit()?;
 
@@ -1330,7 +1338,18 @@ pub mod install {
             status!("Already up to date");
         } else if analysis.is_fast_forward() {
             // Fast-forward
-            let refname = format!("refs/heads/{}", branch_name);
+            let refname = format!("refs/heads/{}", target_branch);
+
+            // Create local branch if it doesn't exist
+            if repo.find_reference(&refname).is_err() {
+                repo.reference(
+                    &refname,
+                    upstream_commit.id(),
+                    false,
+                    &format!("Create branch {}", target_branch),
+                )?;
+            }
+
             let mut reference = repo.find_reference(&refname)?;
             reference.set_target(upstream_commit.id(), "Fast-forward")?;
             repo.set_head(&refname)?;
@@ -1340,7 +1359,11 @@ pub mod install {
             checkout_opts.force();
             repo.checkout_head(Some(&mut checkout_opts))?;
 
-            status!("Fast-forwarded {} to {}", branch_name, upstream_commit.id());
+            status!(
+                "Fast-forwarded {} to {}",
+                target_branch,
+                upstream_commit.id()
+            );
         } else {
             // Need to perform a merge
             let mut merge_opts = git2::MergeOptions::new();
@@ -1367,7 +1390,7 @@ pub mod install {
                 Some("HEAD"),
                 &sig,
                 &sig,
-                &format!("Merge remote-tracking branch 'origin/{}'", branch_name),
+                &format!("Merge remote-tracking branch 'origin/{}'", target_branch),
                 &tree,
                 &[&local_commit, &upstream_commit],
             )?;
@@ -1375,7 +1398,7 @@ pub mod install {
             // Clean up merge state
             repo.cleanup_state()?;
 
-            status!("Merged origin/{} into {}", branch_name, branch_name);
+            status!("Merged origin/{} into {}", target_branch, target_branch);
         }
 
         status!(
@@ -1394,7 +1417,7 @@ pub mod install {
 
         // git pull the Verus repo
         let verus_dir = verus_dir();
-        git_pull(&verus_dir)?;
+        git_pull(&verus_dir, options.branch.as_ref().map(|s| s.as_str()))?;
         status!("Verus repo updated to the latest version");
 
         // Build Verus
