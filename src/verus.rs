@@ -1098,7 +1098,7 @@ pub mod install {
         pub release: bool,
     }
 
-    pub const VERUS_REPO: &str = "https://github.com/verus-lang/verus.git";
+    pub const VERUS_REPO: &str = "https://github.com/asterinas/verus.git";
 
     #[memoize]
     pub fn tools_dir() -> PathBuf {
@@ -1267,7 +1267,7 @@ pub mod install {
         install_z3()?;
 
         // Apply patches
-        let verus_patch = tools_patch_dir().join("verus-fixes.patch");
+        /*let verus_patch = tools_patch_dir().join("verus-fixes.patch");
         if verus_patch.exists() && !commands::is_patch_applied(&verus_dir, &verus_patch) {
             status!(
                 "Applying patch {} to {} ...",
@@ -1275,7 +1275,7 @@ pub mod install {
                 verus_dir.display()
             );
             commands::apply_patch(&verus_dir, &verus_patch);
-        }
+        }*/
 
         // Build Verus
         build_verus(options.release)?;
