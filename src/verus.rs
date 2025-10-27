@@ -15,7 +15,6 @@ use cargo_metadata::CrateType;
 
 use crate::commands::CargoBuildExterns;
 use crate::generator::Generative;
-use crate::projects::get_root;
 use crate::{
     commands, dep_tree, executable, files, fingerprint, generator, projects, serialization,
 };
@@ -1322,7 +1321,7 @@ pub mod install {
             return Err("HEAD is not a branch. Cannot pull.".into());
         }
 
-        let branch_name = head.shorthand().ok_or("Could not get branch name")?;
+        let _ = head.shorthand().ok_or("Could not get branch name")?;
         let local_commit = head.peel_to_commit()?;
 
         // Find the matching remote branch
