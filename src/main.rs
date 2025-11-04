@@ -44,6 +44,13 @@ enum Commands {
     Compile(CompileArgs),
 
     #[command(
+        name = "clean",
+        about = "Clean build artefacts produced by `cargo dv compile`",
+        alias = "cl"
+    )]
+    Clean(CleanArgs),
+
+    #[command(
         name = "fingerprint",
         about = "Print the fingerprint of the verification targets",
         alias = "fp"
@@ -269,6 +276,24 @@ struct CompileArgs {
 }
 
 #[derive(Parser, Debug)]
+struct CleanArgs {
+    #[arg(
+        short = 't',
+        long = "targets",
+        value_parser = verus::find_target,
+        help = "The targets to clean",
+        num_args = 0..,
+        action = ArgAction::Append)]
+    targets: Vec<VerusTarget>,
+    #[arg(
+        long = "all",
+        help = "Clean verification artifacts for all workspace targets",
+        default_value = "false",
+        action = ArgAction::SetTrue)]
+    all: bool,
+}
+
+#[derive(Parser, Debug)]
 struct FingerprintArgs {
     #[arg(
         short = 't',
@@ -440,6 +465,16 @@ fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
     Ok(())
 }
 
+fn clean(args: &CleanArgs) -> Result<(), DynError> {
+    let targets = args.targets.clone();
+    // if --all provided, pass empty targets with all=true to verus
+    if args.all {
+        verus::exec_clean(&[], true)
+    } else {
+        verus::exec_clean(&targets, false)
+    }
+}
+
 fn list_targets(_args: &ListTargetsArgs) -> Result<(), DynError> {
     let targets = verus::verus_targets();
     let width = targets.keys().map(|s| s.len()).max().unwrap_or(0).min(70) + 1;
@@ -506,6 +541,7 @@ fn main() {
         Commands::NewTarget(args) => new_target(args),
         Commands::ShowItem(args) => show_item(args),
         Commands::Format(args) => format(args),
+        Commands::Clean(args) => clean(args),
     } {
         error!("Error when executing command `{:?}`: {}", cli.command, e);
     }
