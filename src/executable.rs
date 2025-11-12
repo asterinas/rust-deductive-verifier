@@ -1,8 +1,7 @@
 use crate::files;
-use colored::Colorize;
+
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub fn locate_from_path<P>(binary: &P) -> Option<PathBuf>
 where
@@ -73,7 +72,10 @@ where
 
 // On Windows, prefer pwsh if available, otherwise fall back to powershell.
 #[cfg(target_os = "windows")]
-pub fn get_powershell_command() -> std::io::Result<Command> {
+pub fn get_powershell_command() -> std::io::Result<std::process::Command> {
+    use colored::Colorize;
+    use std::process::Command;
+
     let check_pwsh = Command::new("pwsh")
         .arg("/?")
         .stdout(std::process::Stdio::null())
