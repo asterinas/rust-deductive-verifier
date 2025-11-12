@@ -75,7 +75,7 @@ where
 pub fn get_powershell_command() -> std::io::Result<std::process::Command> {
     use colored::Colorize;
     use std::process::Command;
-    
+
     let check_pwsh = Command::new("pwsh")
         .arg("/?")
         .stdout(std::process::Stdio::null())
