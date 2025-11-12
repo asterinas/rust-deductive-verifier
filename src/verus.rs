@@ -1268,7 +1268,8 @@ pub mod install {
         pub branch: Option<String>,
     }
 
-    pub const VERUS_REPO: &str = "https://git@github.com/asterinas/verus.git";
+    pub const VERUS_REPO_HTTPS: &str = "https://github.com/asterinas/verus.git";
+    pub const VERUS_REPO_SSH: &str = "git@github.com:asterinas/verus.git";
 
     #[memoize]
     pub fn tools_dir() -> PathBuf {
@@ -1291,15 +1292,27 @@ pub mod install {
     }
 
     pub fn clone_repo(verus_dir: &Path) -> Result<(), DynError> {
-        info!(
-            "Cloning Verus repo {} to {} ...",
-            VERUS_REPO,
-            verus_dir.display()
-        );
+        info!("Cloning Verus repo to {} ...", verus_dir.display());
 
-        Repository::clone(VERUS_REPO, verus_dir).unwrap_or_else(|e| {
-            error!("Failed to clone verus repo: {}", e);
+        let mut builder = git2::build::RepoBuilder::new();
+        let mut callbacks = git2::RemoteCallbacks::new();
+
+        callbacks.credentials(|_url, username_from_url, _allowed_types| {
+            git2::Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
         });
+
+        let mut fetch_opts = git2::FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
+        builder.fetch_options(fetch_opts);
+
+        let ssh_result = builder.clone(VERUS_REPO_SSH, verus_dir);
+        if ssh_result.is_ok() {
+            return Ok(());
+        }
+
+        Repository::clone(VERUS_REPO_HTTPS, verus_dir)
+            .map_err(|e| format!("Failed to clone verus repo: {}", e))?;
+
         Ok(())
     }
 
@@ -1440,17 +1453,6 @@ pub mod install {
         // Download Z3
         install_z3()?;
 
-        // Apply patches
-        /*let verus_patch = tools_patch_dir().join("verus-fixes.patch");
-        if verus_patch.exists() && !commands::is_patch_applied(&verus_dir, &verus_patch) {
-            status!(
-                "Applying patch {} to {} ...",
-                verus_patch.display(),
-                verus_dir.display()
-            );
-            commands::apply_patch(&verus_dir, &verus_patch);
-        }*/
-
         // Build Verus
         build_verus(options.release)?;
 
@@ -1481,12 +1483,19 @@ pub mod install {
         // Determine target branch (default to "main")
         let target_branch = branch.unwrap_or("main");
 
-        // Find the remote and fetch the target branch
+        // Find the remote and check its URL to determine authentication method
         let mut remote = repo.find_remote("origin")?;
+        let remote_url = remote.url().unwrap_or("");
+        let is_ssh = remote_url.starts_with("git@") || remote_url.contains("ssh://");
+
         let mut callbacks = git2::RemoteCallbacks::new();
-        callbacks.credentials(|_url, username_from_url, _allowed_types| {
-            git2::Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
-        });
+
+        if is_ssh {
+            // SSH repository - use SSH key authentication
+            callbacks.credentials(|_url, username_from_url, _allowed_types| {
+                git2::Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
+            });
+        }
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
         remote.fetch(&[target_branch], Some(&mut fetch_opts), None)?;
