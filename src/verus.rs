@@ -1268,7 +1268,7 @@ pub mod install {
         pub branch: Option<String>,
     }
 
-    pub const VERUS_REPO: &str = "https://github.com/asterinas/verus.git";
+    pub const VERUS_REPO: &str = "https://git@github.com/asterinas/verus.git";
 
     #[memoize]
     pub fn tools_dir() -> PathBuf {
@@ -1483,7 +1483,11 @@ pub mod install {
 
         // Find the remote and fetch the target branch
         let mut remote = repo.find_remote("origin")?;
-        remote.fetch(&[target_branch], None, None)?;
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(|_url, username_from_url, _allowed_types| {    git2::Cred::ssh_key_from_agent(username_from_url.unwrap_or("git")) });
+        let mut fetch_opts = git2::FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
+        remote.fetch(&[target_branch], Some(&mut fetch_opts), None)?;
 
         // Get the current branch
         let head = repo.head()?;
