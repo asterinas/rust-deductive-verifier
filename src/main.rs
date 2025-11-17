@@ -1,6 +1,7 @@
 use clap::{ArgAction, Parser, Subcommand};
 use colored::Colorize;
 use rust_dv::helper::*;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -392,6 +393,11 @@ struct FmtArgs {
         help = "The targets to format", num_args = 0..,
         action = ArgAction::Append)]
     targets: Vec<String>,
+
+    #[arg(short = 'p', long = "paths",
+        help = "Specific file or directory paths to format", num_args = 0..,
+        action = ArgAction::Append)]
+    paths: Vec<PathBuf>,
 }
 
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
@@ -513,11 +519,17 @@ fn show_item(args: &ShowItemArgs) -> Result<(), DynError> {
 }
 
 fn format(args: &FmtArgs) -> Result<(), DynError> {
-    // do `cargo fmt` befor verusfmt
-    format::run_cargo_fmt(&args.targets);
+    if !args.paths.is_empty() {
+        // Format specific paths
+        format::format_paths(&args.paths)?;
+    } else {
+        // Format by targets (existing behavior)
+        // do `cargo fmt` before verusfmt
+        format::run_cargo_fmt(&args.targets);
 
-    // format the source code of vostd
-    format::format_vostd(&args.targets);
+        // format the source code of vostd
+        format::format_vostd(&args.targets);
+    }
     Ok(())
 }
 
