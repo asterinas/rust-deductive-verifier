@@ -1266,6 +1266,7 @@ pub mod install {
         pub restart: bool,
         pub release: bool,
         pub branch: Option<String>,
+        pub force_reset: bool,
     }
 
     pub const VERUS_REPO_HTTPS: &str = "https://github.com/asterinas/verus.git";
@@ -1471,7 +1472,7 @@ pub mod install {
         Ok(())
     }
 
-    pub fn git_pull(dir: &Path, branch: Option<&str>) -> Result<(), DynError> {
+    pub fn git_pull(dir: &Path, branch: Option<&str>, force_reset: bool) -> Result<(), DynError> {
         let repo = Repository::open(dir).unwrap_or_else(|e| {
             error!(
                 "Unable to find the git repo of verus under {}: {}",
@@ -1562,7 +1563,51 @@ pub mod install {
 
             // Check for conflicts
             if repo.index()?.has_conflicts() {
-                error!("There are conflicts between the recent updates and patches. Please resolve them manually.");
+                if force_reset {
+                    status!(
+                        "Conflicts detected, performing force reset to origin/{}",
+                        target_branch
+                    );
+
+                    // Reset the index to clean state
+                    repo.reset(
+                        &repo.head()?.peel_to_commit()?.as_object(),
+                        git2::ResetType::Hard,
+                        None,
+                    )?;
+
+                    // Force reset to the remote branch
+                    let refname = format!("refs/heads/{}", target_branch);
+
+                    // Create or update the local branch reference
+                    if repo.find_reference(&refname).is_err() {
+                        repo.reference(
+                            &refname,
+                            upstream_commit.id(),
+                            false,
+                            &format!("Force reset to origin/{}", target_branch),
+                        )?;
+                    } else {
+                        let mut reference = repo.find_reference(&refname)?;
+                        reference.set_target(
+                            upstream_commit.id(),
+                            &format!("Force reset to origin/{}", target_branch),
+                        )?;
+                    }
+
+                    // Set HEAD to the target branch
+                    repo.set_head(&refname)?;
+
+                    // Force checkout to update working directory
+                    let mut checkout_opts = git2::build::CheckoutBuilder::new();
+                    checkout_opts.force();
+                    repo.checkout_head(Some(&mut checkout_opts))?;
+
+                    status!("Force reset to origin/{} completed", target_branch);
+                    return Ok(());
+                } else {
+                    error!("There are conflicts between the recent updates and patches. Please resolve them manually.");
+                }
             }
 
             // Create the merge commit
@@ -1601,7 +1646,11 @@ pub mod install {
 
         // git pull the Verus repo
         let verus_dir = verus_dir();
-        git_pull(&verus_dir, options.branch.as_ref().map(|s| s.as_str()))?;
+        git_pull(
+            &verus_dir,
+            options.branch.as_ref().map(|s| s.as_str()),
+            options.force_reset,
+        )?;
         status!("Verus repo updated to the latest version");
 
         // Build Verus

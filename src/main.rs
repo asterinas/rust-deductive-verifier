@@ -423,6 +423,7 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
         } else {
             None
         },
+        force_reset: args.upgrade && args.test_branch,
     };
 
     if args.upgrade {
