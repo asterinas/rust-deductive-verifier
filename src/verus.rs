@@ -152,8 +152,6 @@ pub fn system_crates() -> HashSet<&'static str> {
         "build-script-build",
         "borsh",
         "vstd",
-        "verus_builtin",
-        "verus_builtin_macros",
         "verus_state_machines_macros",
     ])
 }
@@ -165,8 +163,6 @@ pub fn system_crates() -> HashSet<&'static str> {
         "build-script-build",
         "borsh",
         "vstd",
-        "verus_builtin",
-        "verus_builtin_macros",
         "verus_state_machines_macros",
     ])
 }
@@ -178,8 +174,6 @@ pub fn system_crates() -> HashSet<&'static str> {
         "build-script-build",
         "borsh",
         "vstd",
-        "verus_builtin",
-        "verus_builtin_macros",
         "verus_state_machines_macros",
     ])
 }
