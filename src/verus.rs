@@ -710,13 +710,51 @@ pub fn check_import_with_auto_compile(
             }
         }
 
-        // Compile the missing targets themselves
-        for target in &missing_targets {
-            if !target.library_proof().exists() {
-                compile_target(target, &vec![], options).map_err(|e| {
-                    format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
-                })?;
+        // Compile the missing targets themselves in proper dependency order
+        // First, build a dependency graph for the missing targets
+        let all_targets = verus_targets();
+        let mut sorted_missing = Vec::new();
+        let mut compiled = std::collections::HashSet::new();
+
+        fn compile_if_needed(
+            target: &VerusTarget,
+            all_targets: &HashMap<String, VerusTarget>,
+            compiled: &mut std::collections::HashSet<String>,
+            missing_targets: &[VerusTarget],
+            options: &ExtraOptions,
+            sorted_missing: &mut Vec<VerusTarget>,
+        ) -> Result<(), DynError> {
+            if compiled.contains(&target.name) {
+                return Ok(());
             }
+
+            // Compile dependencies first
+            for dep in &target.dependencies {
+                if let Some(dep_target) = all_targets.get(&dep.name) {
+                    // Only compile if it's in missing_targets list
+                    if missing_targets.iter().any(|t| t.name == dep.name) {
+                        compile_if_needed(dep_target, all_targets, compiled, missing_targets, options, sorted_missing)?;
+                    }
+                }
+            }
+
+            // Now compile this target if it's in the missing list
+            if missing_targets.iter().any(|t| t.name == target.name) {
+                if !target.library_proof().exists() {
+                    compile_target(target, &vec![], options).map_err(|e| {
+                        format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
+                    })?;
+                }
+                sorted_missing.push(target.clone());
+                compiled.insert(target.name.clone());
+            }
+
+            Ok(())
+        }
+
+        // Process each missing target in order, ensuring dependencies are compiled first
+        for target in &missing_targets {
+            compile_if_needed(target, &all_targets, &mut compiled, &missing_targets, options, &mut sorted_missing)?;
         }
     }
 
@@ -998,13 +1036,46 @@ pub fn exec_verify(
     let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
 
     let extended_targets = get_dependent_targets_batch(targets, options.release);
-    for target in extended_targets.values() {
-        compile_target(target, &vec![], options).unwrap_or_else(|e| {
-            error!(
-                "Unable to build the dependent proof: `{}` ({})",
-                target.name, e
-            );
-        });
+    
+    // Compile dependencies in proper topological order
+    let all_targets = verus_targets();
+    let mut compiled = std::collections::HashSet::new();
+    
+    fn compile_with_deps(
+        target_name: &str,
+        all_targets: &HashMap<String, VerusTarget>,
+        compiled: &mut std::collections::HashSet<String>,
+        extended_targets: &IndexMap<String, VerusTarget>,
+        options: &ExtraOptions,
+    ) {
+        if compiled.contains(target_name) {
+            return;
+        }
+        
+        if let Some(target) = all_targets.get(target_name) {
+            // First compile all dependencies
+            for dep in &target.dependencies {
+                if extended_targets.contains_key(&dep.name) {
+                    compile_with_deps(&dep.name, all_targets, compiled, extended_targets, options);
+                }
+            }
+            
+            // Then compile this target if it's in extended_targets
+            if extended_targets.contains_key(target_name) {
+                compile_target(target, &vec![], options).unwrap_or_else(|e| {
+                    error!(
+                        "Unable to build the dependent proof: `{}` ({})",
+                        target.name, e
+                    );
+                });
+                compiled.insert(target_name.to_string());
+            }
+        }
+    }
+    
+    // Process each dependency in extended_targets
+    for target_name in extended_targets.keys() {
+        compile_with_deps(target_name, &all_targets, &mut compiled, &extended_targets, options);
     }
 
     let ts_start = Instant::now();
