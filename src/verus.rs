@@ -681,7 +681,6 @@ pub fn check_imports_compiled(imports: &[&VerusTarget]) -> Result<(), DynError> 
     Ok(())
 }
 
-
 pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError> {
     for (name, path) in externs.iter() {
         if !Path::new(path).exists() {
@@ -793,6 +792,19 @@ fn get_build_dir(release: bool) -> &'static str {
     }
 }
 
+/// Compile a single target using the Verus verifier.
+///
+/// This function directly invokes the Verus compiler on a single target.
+/// It handles dependency setup, external crate linking, and compilation options.
+/// It does NOT recursively compile dependencies, an error will occur if dependencies
+/// are missing. To compile a target along with its dependencies,
+///  - use `compile_target_with_dependencies` for that.
+///
+/// # Arguments
+///
+/// * `target` - The target to compile
+/// * `imports` - Additional targets to import (not auto-discovered)
+/// * `options` - Compilation options (log, trace, release, max_errors, disasm, pass_through)
 pub fn compile_single_target(
     target: &VerusTarget,
     imports: &[VerusTarget],
@@ -939,35 +951,57 @@ pub fn compile_single_target(
     Err(format!("Error during compilation: `{}`", target.name,).into())
 }
 
+/// Recursively compile a target and all its dependencies in the correct order.
+///
+/// This function handles the recursive compilation of a target and its dependencies,
+/// ensuring proper topological ordering. It ensures that all dependencies of a target
+/// are compiled before the target itself. It also maintains a set of already-compiled
+/// targets to avoid redundant compilation.
+///
+/// # Arguments
+///
+/// * `target` - The target to compile along with its dependencies
+/// * `compiled` - Set tracking already-compiled target names (modified in-place)
+/// * `scope_targets` - Map of targets allowed to be compiled (acts as a scope limiter).
+///   Only targets in this map will actually be compiled, even if they're in dependencies.
+/// * `options` - Extra compilation options
+///
+/// # Behavior
+///
+/// 1. Returns early if the target is already in the `compiled` set
+/// 2. Recursively compiles all dependencies that are in `extended_targets`
+/// 3. Compiles the target itself if it's in `extended_targets`
+/// 4. Marks the target as compiled to prevent duplicate work
 pub fn compile_target_with_dependencies(
-    target_name: &str,
-    all_targets: &HashMap<String, VerusTarget>,
+    target: &VerusTarget,
     compiled: &mut std::collections::HashSet<String>,
-    extended_targets: &IndexMap<String, VerusTarget>,
+    scope_targets: &IndexMap<String, VerusTarget>,
     options: &ExtraOptions,
 ) {
-    if compiled.contains(target_name) {
+    let all_targets = verus_targets();
+
+    if compiled.contains(&target.name) {
         return;
     }
 
-    if let Some(target) = all_targets.get(target_name) {
-        // First compile all dependencies
-        for dep in &target.dependencies {
-            if extended_targets.contains_key(&dep.name) {
-                compile_target_with_dependencies(&dep.name, all_targets, compiled, extended_targets, options);
+    // First compile all dependencies that exist in scope
+    for dep in &target.dependencies {
+        if scope_targets.contains_key(&dep.name) {
+            if let Some(dep_target) = all_targets.get(&dep.name) {
+                compile_target_with_dependencies(dep_target, compiled, scope_targets, options);
             }
         }
+    }
 
-        // Then compile this target if it's in extended_targets
-        if extended_targets.contains_key(target_name) {
-            compile_single_target(target, &vec![], options).unwrap_or_else(|e| {
-                error!(
-                    "Unable to build the dependent proof: `{}` ({})",
-                    target.name, e
-                );
-            });
-            compiled.insert(target_name.to_string());
-        }
+    // Then compile this target if it's in scope
+    if scope_targets.contains_key(&target.name) {
+        compile_single_target(target, &vec![], options).unwrap_or_else(|e| {
+            error!(
+                "Unable to build the dependent proof: `{}` ({})",
+                target.name, e
+            );
+        });
+        compiled.insert(target.name.clone());
     }
 }
 
@@ -987,13 +1021,14 @@ pub fn exec_verify(
 
     let extended_targets = get_dependent_targets_batch(targets, options.release);
 
-    // Compile dependencies in proper topological order
-    let all_targets = verus_targets();
     let mut compiled = std::collections::HashSet::new();
+    let all_targets = verus_targets();
 
     // Process each dependency in extended_targets
     for target_name in extended_targets.keys() {
-        compile_target_with_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
+        if let Some(target) = all_targets.get(target_name) {
+            compile_target_with_dependencies(target, &mut compiled, &extended_targets, options);
+        }
     }
 
     let ts_start = Instant::now();
@@ -1045,7 +1080,6 @@ pub fn exec_verify(
             );
             info!("Automatically compiling missing dependencies...");
 
-            let all_targets = verus_targets();
             let mut compiled = std::collections::HashSet::new();
             let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
                 .iter()
@@ -1053,7 +1087,12 @@ pub fn exec_verify(
                 .collect();
 
             for target_item in &missing_targets {
-                compile_target_with_dependencies(&target_item.name, &all_targets, &mut compiled, &missing_targets_map, options);
+                compile_target_with_dependencies(
+                    target_item,
+                    &mut compiled,
+                    &missing_targets_map,
+                    options,
+                );
             }
         }
 
@@ -1181,14 +1220,14 @@ pub fn exec_compile(
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
     let extended_targets = get_dependent_targets_batch(targets, options.release);
-    
-    // Compile dependencies in proper topological order
-    let all_targets = verus_targets();
     let mut compiled = std::collections::HashSet::new();
+    let all_targets = verus_targets();
 
     // Process each dependency in extended_targets
     for target_name in extended_targets.keys() {
-        compile_target_with_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
+        if let Some(target) = all_targets.get(target_name) {
+            compile_target_with_dependencies(target, &mut compiled, &extended_targets, options);
+        }
     }
 
     // remove the targets that has been compiled
