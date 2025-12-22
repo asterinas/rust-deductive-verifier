@@ -564,11 +564,11 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
     let mut result = IndexMap::new();
     let mut visited = std::collections::HashSet::new();
 
-    // Recursive helper to collect all dependencies
-    fn collect_recursive(
+    fn collect_deps_recursively(
         target: &VerusTarget,
         result: &mut IndexMap<String, VerusTarget>,
         visited: &mut std::collections::HashSet<String>,
+        _is_root: bool,
     ) {
         let target_name = target.name.replace('-', "_");
 
@@ -581,17 +581,18 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
         // Get direct dependencies
         let direct_deps = get_local_dependency_direct(target);
 
-        // Add direct dependencies to result and recursively collect their dependencies
+        // Add direct dependencies to result (unless it's the root target)
         for (dep_name, dep_target) in direct_deps.iter() {
             let dep_key = dep_name.replace('-', "_");
             if !result.contains_key(&dep_key) {
                 result.insert(dep_key, dep_target.clone());
             }
-            collect_recursive(dep_target, result, visited);
+            // Recursively collect dependencies of this dependency
+            collect_deps_recursively(dep_target, result, visited, false);
         }
     }
 
-    collect_recursive(target, &mut result, &mut visited);
+    collect_deps_recursively(target, &mut result, &mut visited, true);
     result
 }
 
@@ -704,7 +705,7 @@ fn compile_missing_target_recursively(
     // Now compile this target if it's in the missing list
     if missing_targets.iter().any(|t| t.name == target.name) {
         if !target.library_proof().exists() {
-            compile_single_target(target, &vec![], options).map_err(|e| {
+            compile_target(target, &vec![], options).map_err(|e| {
                 format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
             })?;
         }
@@ -737,7 +738,7 @@ pub fn compile_missing_targets(
         let extended_targets = get_dependent_targets_batch(&missing_targets, options.release);
         for target in extended_targets.values() {
             if !target.library_proof().exists() {
-                compile_single_target(target, &vec![], options).map_err(|e| {
+                compile_target(target, &vec![], options).map_err(|e| {
                     format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
                 })?;
             }
@@ -868,7 +869,7 @@ fn get_build_dir(release: bool) -> &'static str {
     }
 }
 
-pub fn compile_single_target(
+pub fn compile_target(
     target: &VerusTarget,
     imports: &[VerusTarget],
     options: &ExtraOptions,
@@ -1037,7 +1038,7 @@ pub fn prepare_all_dependencies(
 
         // Then compile this target if it's in extended_targets
         if extended_targets.contains_key(target_name) {
-            compile_single_target(target, &vec![], options).unwrap_or_else(|e| {
+            compile_target(target, &vec![], options).unwrap_or_else(|e| {
                 error!(
                     "Unable to build the dependent proof: `{}` ({})",
                     target.name, e
@@ -1251,7 +1252,7 @@ pub fn exec_compile(
         .collect::<Vec<_>>();
 
     for target in remaining_targets.iter() {
-        compile_single_target(target, imports, options)?;
+        compile_target(target, imports, options)?;
     }
 
     Ok(())
