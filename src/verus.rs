@@ -681,44 +681,6 @@ pub fn check_imports_compiled(imports: &[&VerusTarget]) -> Result<(), DynError> 
     Ok(())
 }
 
-pub fn compile_missing_targets(
-    imports: &[&VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
-    let mut missing_targets = Vec::new();
-
-    for imp in imports.iter() {
-        if !imp.library_proof().exists() || !imp.library_path().exists() {
-            missing_targets.push((*imp).clone());
-        }
-    }
-
-    if !missing_targets.is_empty() {
-        info!(
-            "Missing verification files for dependencies: {:?}",
-            missing_targets.iter().map(|t| &t.name).collect::<Vec<_>>()
-        );
-        info!("Automatically compiling missing dependencies...");
-
-        // Compile the missing targets and their dependencies in proper dependency order
-        let all_targets = verus_targets();
-        let mut compiled = std::collections::HashSet::new();
-
-        // Convert missing_targets to IndexMap for compile_target_with_dependencies
-        let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
-            .iter()
-            .map(|t| (t.name.clone(), t.clone()))
-            .collect();
-
-        // Process each missing target in order, which recursively compiles all dependencies
-        for target in &missing_targets {
-            compile_target_with_dependencies(&target.name, &all_targets, &mut compiled, &missing_targets_map, options);
-        }
-    }
-
-    // Final check
-    check_imports_compiled(imports)
-}
 
 pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError> {
     for (name, path) in externs.iter() {
@@ -831,7 +793,7 @@ fn get_build_dir(release: bool) -> &'static str {
     }
 }
 
-pub fn compile_target(
+pub fn compile_single_target(
     target: &VerusTarget,
     imports: &[VerusTarget],
     options: &ExtraOptions,
@@ -889,9 +851,7 @@ pub fn compile_target(
     // imported dependencies
     deps.extend(extra_imports.clone());
     let all_imports = deps.values().collect::<Vec<_>>();
-    compile_missing_targets(all_imports.as_slice(), options).unwrap_or_else(|e| {
-        error!("Error during verification: {}", e);
-    });
+    check_imports_compiled(all_imports.as_slice())?;
     cmd_push_import(cmd, all_imports.as_slice());
 
     // import external crates
@@ -1000,7 +960,7 @@ pub fn compile_target_with_dependencies(
 
         // Then compile this target if it's in extended_targets
         if extended_targets.contains_key(target_name) {
-            compile_target(target, &vec![], options).unwrap_or_else(|e| {
+            compile_single_target(target, &vec![], options).unwrap_or_else(|e| {
                 error!(
                     "Unable to build the dependent proof: `{}` ({})",
                     target.name, e
@@ -1070,7 +1030,34 @@ pub fn exec_verify(
         deps.extend(extra_imports.clone());
         let all_imports = deps.values().collect::<Vec<_>>();
 
-        compile_missing_targets(all_imports.as_slice(), options).unwrap_or_else(|e| {
+        // Check and compile missing imports
+        let mut missing_targets = Vec::new();
+        for imp in all_imports.iter() {
+            if !imp.library_proof().exists() || !imp.library_path().exists() {
+                missing_targets.push((*imp).clone());
+            }
+        }
+
+        if !missing_targets.is_empty() {
+            info!(
+                "Missing verification files for dependencies: {:?}",
+                missing_targets.iter().map(|t| &t.name).collect::<Vec<_>>()
+            );
+            info!("Automatically compiling missing dependencies...");
+
+            let all_targets = verus_targets();
+            let mut compiled = std::collections::HashSet::new();
+            let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
+                .iter()
+                .map(|t| (t.name.clone(), t.clone()))
+                .collect();
+
+            for target_item in &missing_targets {
+                compile_target_with_dependencies(&target_item.name, &all_targets, &mut compiled, &missing_targets_map, options);
+            }
+        }
+
+        check_imports_compiled(all_imports.as_slice()).unwrap_or_else(|e| {
             error!("Error during verification: {}", e);
         });
         cmd_push_import(cmd, all_imports.as_slice());
@@ -1214,7 +1201,7 @@ pub fn exec_compile(
         .collect::<Vec<_>>();
 
     for target in remaining_targets.iter() {
-        compile_target(target, imports, options)?;
+        compile_single_target(target, imports, options)?;
     }
 
     Ok(())
