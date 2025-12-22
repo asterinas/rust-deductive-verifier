@@ -278,7 +278,7 @@ impl VerusTarget {
         };
 
         // Check if all recursive dependencies have their verification files and are not newer than us
-        let deps = get_local_dependency_recursive(self);
+        let deps = get_local_dependency(self);
         for dep in deps.values() {
             if !dep.library_proof().exists() {
                 return false;
@@ -536,7 +536,7 @@ pub fn find_target(t: &str) -> Result<VerusTarget, String> {
     Ok(target)
 }
 
-pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarget> {
+fn get_local_dependency_direct(target: &VerusTarget) -> IndexMap<String, VerusTarget> {
     let all = verus_targets();
     let mut deps = IndexMap::new();
 
@@ -560,15 +560,15 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
     deps
 }
 
-pub fn get_local_dependency_recursive(target: &VerusTarget) -> IndexMap<String, VerusTarget> {
+pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarget> {
     let mut result = IndexMap::new();
     let mut visited = std::collections::HashSet::new();
 
-    fn collect_deps_recursive(
+    // Recursive helper to collect all dependencies
+    fn collect_recursive(
         target: &VerusTarget,
         result: &mut IndexMap<String, VerusTarget>,
         visited: &mut std::collections::HashSet<String>,
-        _is_root: bool,
     ) {
         let target_name = target.name.replace('-', "_");
 
@@ -579,25 +579,24 @@ pub fn get_local_dependency_recursive(target: &VerusTarget) -> IndexMap<String, 
         visited.insert(target_name.clone());
 
         // Get direct dependencies
-        let direct_deps = get_local_dependency(target);
+        let direct_deps = get_local_dependency_direct(target);
 
-        // Add direct dependencies to result (unless it's the root target)
+        // Add direct dependencies to result and recursively collect their dependencies
         for (dep_name, dep_target) in direct_deps.iter() {
             let dep_key = dep_name.replace('-', "_");
             if !result.contains_key(&dep_key) {
                 result.insert(dep_key, dep_target.clone());
             }
-            // Recursively collect dependencies of this dependency
-            collect_deps_recursive(dep_target, result, visited, false);
+            collect_recursive(dep_target, result, visited);
         }
     }
 
-    collect_deps_recursive(target, &mut result, &mut visited, true);
+    collect_recursive(target, &mut result, &mut visited);
     result
 }
 
 pub fn get_dependent_targets(target: &VerusTarget, release: bool) -> IndexMap<String, VerusTarget> {
-    let mut deps = get_local_dependency_recursive(target);
+    let mut deps = get_local_dependency(target);
     let order = resolve_deps_cached(target, release).full_externs;
     deps.sort_by(|a, _, b, _| {
         let x = order.get_index_of(a).unwrap_or(usize::MAX);
@@ -613,7 +612,7 @@ pub fn get_dependent_targets_batch(
 ) -> IndexMap<String, VerusTarget> {
     let mut deps = IndexMap::new();
     for target in targets.iter() {
-        deps.extend(get_local_dependency_recursive(target));
+        deps.extend(get_local_dependency(target));
     }
     let order = resolve_deps_cached(targets.first().unwrap(), release).full_externs;
     deps.sort_by(|a, _, b, _| {
@@ -659,7 +658,7 @@ pub fn cmd_push_import(cmd: &mut Command, imports: &[&VerusTarget]) {
     }
 }
 
-pub fn check_import(imports: &[&VerusTarget]) -> Result<(), DynError> {
+pub fn check_imports_exist(imports: &[&VerusTarget]) -> Result<(), DynError> {
     for imp in imports.iter() {
         if !imp.library_proof().exists() {
             return Err(format!(
@@ -681,7 +680,7 @@ pub fn check_import(imports: &[&VerusTarget]) -> Result<(), DynError> {
     Ok(())
 }
 
-pub fn compile_missing_imports_in_order(
+fn compile_missing_target_recursively(
     target: &VerusTarget,
     all_targets: &HashMap<String, VerusTarget>,
     compiled: &mut std::collections::HashSet<String>,
@@ -697,7 +696,7 @@ pub fn compile_missing_imports_in_order(
         if let Some(dep_target) = all_targets.get(&dep.name) {
             // Only compile if it's in missing_targets list
             if missing_targets.iter().any(|t| t.name == dep.name) {
-                compile_missing_imports_in_order(dep_target, all_targets, compiled, missing_targets, options)?;
+                compile_missing_target_recursively(dep_target, all_targets, compiled, missing_targets, options)?;
             }
         }
     }
@@ -705,7 +704,7 @@ pub fn compile_missing_imports_in_order(
     // Now compile this target if it's in the missing list
     if missing_targets.iter().any(|t| t.name == target.name) {
         if !target.library_proof().exists() {
-            compile_target(target, &vec![], options).map_err(|e| {
+            compile_single_target(target, &vec![], options).map_err(|e| {
                 format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
             })?;
         }
@@ -715,7 +714,7 @@ pub fn compile_missing_imports_in_order(
     Ok(())
 }
 
-pub fn check_import_with_auto_compile(
+pub fn compile_missing_targets(
     imports: &[&VerusTarget],
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
@@ -738,7 +737,7 @@ pub fn check_import_with_auto_compile(
         let extended_targets = get_dependent_targets_batch(&missing_targets, options.release);
         for target in extended_targets.values() {
             if !target.library_proof().exists() {
-                compile_target(target, &vec![], options).map_err(|e| {
+                compile_single_target(target, &vec![], options).map_err(|e| {
                     format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
                 })?;
             }
@@ -750,12 +749,12 @@ pub fn check_import_with_auto_compile(
 
         // Process each missing target in order, ensuring dependencies are compiled first
         for target in &missing_targets {
-            compile_missing_imports_in_order(target, &all_targets, &mut compiled, &missing_targets, options)?;
+            compile_missing_target_recursively(target, &all_targets, &mut compiled, &missing_targets, options)?;
         }
     }
 
     // Final check
-    check_import(imports)
+    check_imports_exist(imports)
 }
 
 pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError> {
@@ -869,7 +868,7 @@ fn get_build_dir(release: bool) -> &'static str {
     }
 }
 
-pub fn compile_target(
+pub fn compile_single_target(
     target: &VerusTarget,
     imports: &[VerusTarget],
     options: &ExtraOptions,
@@ -893,7 +892,7 @@ pub fn compile_target(
 
     prepare(target, options.release);
 
-    let mut deps = get_local_dependency_recursive(target);
+    let mut deps = get_local_dependency(target);
     let dep_rebuilt = deps.values().into_iter().any(|t| t.rebuilt == true);
 
     if !dep_rebuilt && target.is_fresh(&verus_targets()) {
@@ -927,7 +926,7 @@ pub fn compile_target(
     // imported dependencies
     deps.extend(extra_imports.clone());
     let all_imports = deps.values().collect::<Vec<_>>();
-    check_import_with_auto_compile(all_imports.as_slice(), options).unwrap_or_else(|e| {
+    compile_missing_targets(all_imports.as_slice(), options).unwrap_or_else(|e| {
         error!("Error during verification: {}", e);
     });
     cmd_push_import(cmd, all_imports.as_slice());
@@ -1017,7 +1016,7 @@ pub fn compile_target(
     Err(format!("Error during compilation: `{}`", target.name,).into())
 }
 
-pub fn compile_deps_in_topological_order(
+pub fn prepare_all_dependencies(
     target_name: &str,
     all_targets: &HashMap<String, VerusTarget>,
     compiled: &mut std::collections::HashSet<String>,
@@ -1032,13 +1031,13 @@ pub fn compile_deps_in_topological_order(
         // First compile all dependencies
         for dep in &target.dependencies {
             if extended_targets.contains_key(&dep.name) {
-                compile_deps_in_topological_order(&dep.name, all_targets, compiled, extended_targets, options);
+                prepare_all_dependencies(&dep.name, all_targets, compiled, extended_targets, options);
             }
         }
 
         // Then compile this target if it's in extended_targets
         if extended_targets.contains_key(target_name) {
-            compile_target(target, &vec![], options).unwrap_or_else(|e| {
+            compile_single_target(target, &vec![], options).unwrap_or_else(|e| {
                 error!(
                     "Unable to build the dependent proof: `{}` ({})",
                     target.name, e
@@ -1071,7 +1070,7 @@ pub fn exec_verify(
 
     // Process each dependency in extended_targets
     for target_name in extended_targets.keys() {
-        compile_deps_in_topological_order(target_name, &all_targets, &mut compiled, &extended_targets, options);
+        prepare_all_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
     }
 
     let ts_start = Instant::now();
@@ -1104,11 +1103,11 @@ pub fn exec_verify(
         }
 
         // imported dependencies
-        let deps = &mut get_local_dependency_recursive(target);
+        let deps = &mut get_local_dependency(target);
         deps.extend(extra_imports.clone());
         let all_imports = deps.values().collect::<Vec<_>>();
 
-        check_import_with_auto_compile(all_imports.as_slice(), options).unwrap_or_else(|e| {
+        compile_missing_targets(all_imports.as_slice(), options).unwrap_or_else(|e| {
             error!("Error during verification: {}", e);
         });
         cmd_push_import(cmd, all_imports.as_slice());
@@ -1232,13 +1231,14 @@ pub fn exec_compile(
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
     let extended_targets = get_dependent_targets_batch(targets, options.release);
-    for target in extended_targets.values() {
-        compile_target(target, &[], options).unwrap_or_else(|e| {
-            error!(
-                "Unable to build the dependent proof: `{}` ({})",
-                target.name, e
-            );
-        });
+    
+    // Compile dependencies in proper topological order
+    let all_targets = verus_targets();
+    let mut compiled = std::collections::HashSet::new();
+
+    // Process each dependency in extended_targets
+    for target_name in extended_targets.keys() {
+        prepare_all_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
     }
 
     // remove the targets that has been compiled
@@ -1251,7 +1251,7 @@ pub fn exec_compile(
         .collect::<Vec<_>>();
 
     for target in remaining_targets.iter() {
-        compile_target(target, imports, options)?;
+        compile_single_target(target, imports, options)?;
     }
 
     Ok(())
