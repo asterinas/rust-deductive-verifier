@@ -700,29 +700,19 @@ pub fn compile_missing_targets(
         );
         info!("Automatically compiling missing dependencies...");
 
-        // Get all dependencies of missing targets to ensure proper compilation order
-        let extended_targets = get_dependent_targets_batch(&missing_targets, options.release);
-        for target in extended_targets.values() {
-            if !target.library_proof().exists() {
-                compile_target(target, &vec![], options).map_err(|e| {
-                    format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
-                })?;
-            }
-        }
-
-        // Compile the missing targets themselves in proper dependency order
+        // Compile the missing targets and their dependencies in proper dependency order
         let all_targets = verus_targets();
         let mut compiled = std::collections::HashSet::new();
 
-        // Convert missing_targets to IndexMap for prepare_all_dependencies
+        // Convert missing_targets to IndexMap for compile_target_with_dependencies
         let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
             .iter()
             .map(|t| (t.name.clone(), t.clone()))
             .collect();
 
-        // Process each missing target in order, ensuring dependencies are compiled first
+        // Process each missing target in order, which recursively compiles all dependencies
         for target in &missing_targets {
-            prepare_all_dependencies(&target.name, &all_targets, &mut compiled, &missing_targets_map, options);
+            compile_target_with_dependencies(&target.name, &all_targets, &mut compiled, &missing_targets_map, options);
         }
     }
 
@@ -989,7 +979,7 @@ pub fn compile_target(
     Err(format!("Error during compilation: `{}`", target.name,).into())
 }
 
-pub fn prepare_all_dependencies(
+pub fn compile_target_with_dependencies(
     target_name: &str,
     all_targets: &HashMap<String, VerusTarget>,
     compiled: &mut std::collections::HashSet<String>,
@@ -1004,7 +994,7 @@ pub fn prepare_all_dependencies(
         // First compile all dependencies
         for dep in &target.dependencies {
             if extended_targets.contains_key(&dep.name) {
-                prepare_all_dependencies(&dep.name, all_targets, compiled, extended_targets, options);
+                compile_target_with_dependencies(&dep.name, all_targets, compiled, extended_targets, options);
             }
         }
 
@@ -1043,7 +1033,7 @@ pub fn exec_verify(
 
     // Process each dependency in extended_targets
     for target_name in extended_targets.keys() {
-        prepare_all_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
+        compile_target_with_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
     }
 
     let ts_start = Instant::now();
@@ -1211,7 +1201,7 @@ pub fn exec_compile(
 
     // Process each dependency in extended_targets
     for target_name in extended_targets.keys() {
-        prepare_all_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
+        compile_target_with_dependencies(target_name, &all_targets, &mut compiled, &extended_targets, options);
     }
 
     // remove the targets that has been compiled
