@@ -681,7 +681,7 @@ pub fn check_import(imports: &[&VerusTarget]) -> Result<(), DynError> {
     Ok(())
 }
 
-pub fn compile_missing_target_with_deps(
+pub fn compile_missing_imports_in_order(
     target: &VerusTarget,
     all_targets: &HashMap<String, VerusTarget>,
     compiled: &mut std::collections::HashSet<String>,
@@ -697,7 +697,7 @@ pub fn compile_missing_target_with_deps(
         if let Some(dep_target) = all_targets.get(&dep.name) {
             // Only compile if it's in missing_targets list
             if missing_targets.iter().any(|t| t.name == dep.name) {
-                compile_missing_target_with_deps(dep_target, all_targets, compiled, missing_targets, options)?;
+                compile_missing_imports_in_order(dep_target, all_targets, compiled, missing_targets, options)?;
             }
         }
     }
@@ -750,7 +750,7 @@ pub fn check_import_with_auto_compile(
 
         // Process each missing target in order, ensuring dependencies are compiled first
         for target in &missing_targets {
-            compile_missing_target_with_deps(target, &all_targets, &mut compiled, &missing_targets, options)?;
+            compile_missing_imports_in_order(target, &all_targets, &mut compiled, &missing_targets, options)?;
         }
     }
 
@@ -1017,7 +1017,7 @@ pub fn compile_target(
     Err(format!("Error during compilation: `{}`", target.name,).into())
 }
 
-pub fn compile_target_with_deps(
+pub fn compile_deps_in_topological_order(
     target_name: &str,
     all_targets: &HashMap<String, VerusTarget>,
     compiled: &mut std::collections::HashSet<String>,
@@ -1032,7 +1032,7 @@ pub fn compile_target_with_deps(
         // First compile all dependencies
         for dep in &target.dependencies {
             if extended_targets.contains_key(&dep.name) {
-                compile_target_with_deps(&dep.name, all_targets, compiled, extended_targets, options);
+                compile_deps_in_topological_order(&dep.name, all_targets, compiled, extended_targets, options);
             }
         }
 
@@ -1071,7 +1071,7 @@ pub fn exec_verify(
 
     // Process each dependency in extended_targets
     for target_name in extended_targets.keys() {
-        compile_target_with_deps(target_name, &all_targets, &mut compiled, &extended_targets, options);
+        compile_deps_in_topological_order(target_name, &all_targets, &mut compiled, &extended_targets, options);
     }
 
     let ts_start = Instant::now();
