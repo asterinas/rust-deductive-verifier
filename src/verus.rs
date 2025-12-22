@@ -659,7 +659,7 @@ pub fn cmd_push_import(cmd: &mut Command, imports: &[&VerusTarget]) {
     }
 }
 
-pub fn check_imports_exist(imports: &[&VerusTarget]) -> Result<(), DynError> {
+pub fn check_imports_compiled(imports: &[&VerusTarget]) -> Result<(), DynError> {
     for imp in imports.iter() {
         if !imp.library_proof().exists() {
             return Err(format!(
@@ -678,40 +678,6 @@ pub fn check_imports_exist(imports: &[&VerusTarget]) -> Result<(), DynError> {
             .into());
         }
     }
-    Ok(())
-}
-
-fn compile_missing_target_recursively(
-    target: &VerusTarget,
-    all_targets: &HashMap<String, VerusTarget>,
-    compiled: &mut std::collections::HashSet<String>,
-    missing_targets: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
-    if compiled.contains(&target.name) {
-        return Ok(());
-    }
-
-    // Compile dependencies first
-    for dep in &target.dependencies {
-        if let Some(dep_target) = all_targets.get(&dep.name) {
-            // Only compile if it's in missing_targets list
-            if missing_targets.iter().any(|t| t.name == dep.name) {
-                compile_missing_target_recursively(dep_target, all_targets, compiled, missing_targets, options)?;
-            }
-        }
-    }
-
-    // Now compile this target if it's in the missing list
-    if missing_targets.iter().any(|t| t.name == target.name) {
-        if !target.library_proof().exists() {
-            compile_target(target, &vec![], options).map_err(|e| {
-                format!("Failed to auto-compile dependency `{}`: {}", target.name, e)
-            })?;
-        }
-        compiled.insert(target.name.clone());
-    }
-
     Ok(())
 }
 
@@ -748,14 +714,20 @@ pub fn compile_missing_targets(
         let all_targets = verus_targets();
         let mut compiled = std::collections::HashSet::new();
 
+        // Convert missing_targets to IndexMap for prepare_all_dependencies
+        let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
+            .iter()
+            .map(|t| (t.name.clone(), t.clone()))
+            .collect();
+
         // Process each missing target in order, ensuring dependencies are compiled first
         for target in &missing_targets {
-            compile_missing_target_recursively(target, &all_targets, &mut compiled, &missing_targets, options)?;
+            prepare_all_dependencies(&target.name, &all_targets, &mut compiled, &missing_targets_map, options);
         }
     }
 
     // Final check
-    check_imports_exist(imports)
+    check_imports_compiled(imports)
 }
 
 pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError> {
