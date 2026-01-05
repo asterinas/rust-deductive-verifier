@@ -1562,7 +1562,12 @@ pub mod install {
 
         // Find the matching remote branch
         let upstream_branch = format!("refs/remotes/origin/{}", target_branch);
-        let upstream_ref = repo.find_reference(&upstream_branch)?;
+        let upstream_ref = repo.find_reference(&upstream_branch).map_err(|_| {
+            format!(
+                "Branch '{}' does not exist in the remote repository. Please check the branch name.",
+                target_branch
+            )
+        })?;
         let upstream_commit = upstream_ref.peel_to_commit()?;
 
         // Check merge analysis
