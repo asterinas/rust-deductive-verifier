@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 
 use crate::commands;
-use crate::helper::warn;
 use std::{
     collections::{HashMap, HashSet},
     process::Command,

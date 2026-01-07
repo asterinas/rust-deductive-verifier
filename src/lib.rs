@@ -7,6 +7,7 @@ pub mod console;
 pub mod commands;
 pub mod config;
 pub mod dep_tree;
+pub mod doc;
 pub mod fingerprint;
 pub mod format;
 pub mod generator;

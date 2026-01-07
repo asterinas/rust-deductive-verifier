@@ -63,6 +63,10 @@ pub const Z3_HINT: &str = "tools/verus/source";
 pub const Z3_EVN: &str = "VERUS_Z3_PATH";
 
 pub const RUSTDOC_BIN: &str = "rustdoc";
+
+#[cfg(target_os = "windows")]
+pub const VERUSDOC_BIN: &str = "verusdoc.exe";
+#[cfg(not(target_os = "windows"))]
 pub const VERUSDOC_BIN: &str = "verusdoc";
 pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target/release";
 pub const VERUSDOC_HINT: &str = "tools/verus/source/target/debug";
@@ -117,14 +121,12 @@ pub fn get_rustdoc() -> PathBuf {
 }
 
 #[memoize]
-pub fn get_verusdoc(release: bool) -> PathBuf {
-    executable::locate(
-            VERUSDOC_BIN,
-            None,
-            if release { &[VERUSDOC_HINT_RELEASE] } else { &[VERUSDOC_HINT] },
-        ).unwrap_or_else(|| {
-            error!("Cannot find the verusdoc binary, please install it using `cargo xtask bootstrap verusdoc`");
-        })
+pub fn get_verusdoc() -> PathBuf {
+    executable::locate(VERUSDOC_BIN, None, &[VERUSDOC_HINT_RELEASE, VERUSDOC_HINT]).unwrap_or_else(
+        || {
+            error!("Cannot find the verusdoc binary, please try `cargo dv bootstrap --upgrade`");
+        },
+    )
 }
 
 #[memoize]
@@ -134,6 +136,15 @@ pub fn get_target_dir() -> PathBuf {
         .exec()
         .expect("Failed to get metadata");
     metadata.target_directory.into_std_path_buf()
+}
+
+#[memoize]
+pub fn get_workspace_root() -> PathBuf {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .no_deps()
+        .exec()
+        .expect("Failed to get metadata");
+    metadata.workspace_root.into_std_path_buf()
 }
 
 #[memoize]
@@ -1458,6 +1469,17 @@ pub mod install {
         cmd.status().unwrap_or_else(|e| {
             error!("Failed to build verus: {}", e);
         });
+
+        let mut verusdoc_cmd = executable::get_powershell_command()?;
+        verusdoc_cmd
+            .current_dir(verus_source_dir())
+            .arg("/c")
+            .arg("& '..\\tools\\activate.ps1'; vargo build -p verusdoc");
+        debug!("{:?}", verusdoc_cmd);
+        verusdoc_cmd.status().unwrap_or_else(|e| {
+            error!("Failed to build verusdoc: {}", e);
+        });
+
         status!("Verus build complete");
         Ok(())
     }
@@ -1480,6 +1502,19 @@ pub mod install {
         cmd.status().unwrap_or_else(|e| {
             error!("Failed to build verus: {}", e);
         });
+
+        let verusdoc_cmd = &mut Command::new("bash");
+        verusdoc_cmd
+            .current_dir(verus_source_dir())
+            .env_remove("RUSTUP_TOOLCHAIN")
+            .env("RUSTUP_TOOLCHAIN", toolchain_name)
+            .arg("-c")
+            .arg("source ../tools/activate; vargo build -p verusdoc");
+        debug!("{:?}", verusdoc_cmd);
+        verusdoc_cmd.status().unwrap_or_else(|e| {
+            error!("Failed to build verusdoc: {}", e);
+        });
+
         status!("Verus build complete");
         Ok(())
     }
