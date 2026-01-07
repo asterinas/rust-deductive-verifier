@@ -121,19 +121,12 @@ pub fn get_rustdoc() -> PathBuf {
 }
 
 #[memoize]
-pub fn get_verusdoc(release: bool) -> PathBuf {
-    executable::locate(
-        VERUSDOC_BIN,
-        None,
-        if release {
-            &[VERUSDOC_HINT_RELEASE]
-        } else {
-            &[VERUSDOC_HINT]
+pub fn get_verusdoc() -> PathBuf {
+    executable::locate(VERUSDOC_BIN, None, &[VERUSDOC_HINT_RELEASE, VERUSDOC_HINT]).unwrap_or_else(
+        || {
+            error!("Cannot find the verusdoc binary, please try `cargo dv bootstrap --upgrade`");
         },
     )
-    .unwrap_or_else(|| {
-        error!("Cannot find the verusdoc binary, please try `cargo dv bootstrap --upgrade`");
-    })
 }
 
 #[memoize]

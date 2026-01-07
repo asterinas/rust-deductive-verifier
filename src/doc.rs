@@ -32,17 +32,11 @@ fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError
 
     generate_single_target_doc(target, verus_conds, &doc_output_dir)?;
 
-    // Run verusdoc post-processor once at the end
     if verus_conds {
         run_verusdoc_postprocessor()?;
     }
 
-    info!(
-        "  {} docs for {} and its dependencies {}",
-        "Generated".bold().green(),
-        target.name.white(),
-        "successfully".white()
-    );
+    info!("{}", "Generation Complete!".bold().green(),);
 
     Ok(())
 }
@@ -54,7 +48,7 @@ fn generate_single_target_doc(
     doc_output_dir: &Path,
 ) -> Result<(), DynError> {
     info!(
-        "  {} {}",
+        "{} {}",
         "Generating docs".bold().blue(),
         target.name.white()
     );
@@ -73,18 +67,32 @@ fn generate_single_target_doc(
     cmd.arg("--extern")
         .arg(format!("vstd={}", vstd_path.display()));
 
-    // Add all dependencies from .rlib files in target directory
-    let all_targets = verus::verus_targets();
-    for (_name, dep_target) in all_targets.iter() {
+    // Add state_machines_macros dependency (proc-macro)
+    let state_machines_macros_path =
+        verus_target_dir.join(format!("verus_state_machines_macros{}", verus::DYN_LIB));
+    if state_machines_macros_path.exists() {
+        cmd.arg("--extern").arg(format!(
+            "verus_state_machines_macros={}",
+            state_machines_macros_path.display()
+        ));
+    }
+
+    // Add dependencies that this target actually needs
+    let deps = verus::get_local_dependency(target);
+    for (_name, dep_target) in deps.iter() {
         if dep_target.name != target.name {
             // Check if .rlib file exists for this dependency
             let rlib_path =
                 target_dir.join(format!("lib{}.rlib", dep_target.name.replace('-', "_")));
             if rlib_path.exists() {
-                // Use the .rlib file as extern dependency
                 let extern_name = dep_target.name.replace('-', "_");
                 cmd.arg("--extern")
                     .arg(format!("{}={}", extern_name, rlib_path.display()));
+            } else {
+                return Err(format!(
+                    "Missing compiled dependency '{}' for target '{}'.\n\nPlease run:\n  cargo dv verify --targets {}",
+                    dep_target.name, target.name, target.name
+                ).into());
             }
         }
     }
@@ -134,17 +142,17 @@ fn generate_single_target_doc(
     }
 
     info!(
-        "  {} {} {}",
-        "Generated docs".bold().green(),
+        "{} {} {}",
+        "Generated docs for".bold().green(),
         target.name.white(),
-        "successfully".white()
+        "successfully".green()
     );
 
     Ok(())
 }
 
 fn run_verusdoc_postprocessor() -> Result<(), DynError> {
-    let verusdoc = verus::get_verusdoc(true);
+    let verusdoc = verus::get_verusdoc();
 
     info!("Running verusdoc post-processor...");
     let status = Command::new(&verusdoc).status()?;
