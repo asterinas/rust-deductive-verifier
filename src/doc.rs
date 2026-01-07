@@ -6,30 +6,6 @@ use std::process::Command;
 /// Generate documentation for verification targets
 pub fn exec_doc(target: &str, verus_conds: bool) -> Result<(), DynError> {
     let target_to_use = verus::find_target(target)?;
-
-    info!(
-        "Generating documentation for target: {}",
-        target_to_use.name
-    );
-
-    // First verify the target to ensure it compiles
-    let verify_options = verus::ExtraOptions {
-        max_errors: 5,
-        log: false,
-        release: true,
-        trace: false,
-        disasm: false,
-        pass_through: vec![],
-        count_line: false,
-    };
-
-    info!(
-        "Verifying {} before generating documentation...",
-        target_to_use.name
-    );
-    verus::exec_verify(&[target_to_use.clone()], &[], &verify_options)?;
-
-    // Generate documentation for the target with all its dependencies
     generate_docs(&target_to_use, verus_conds)?;
     Ok(())
 }
@@ -37,7 +13,7 @@ pub fn exec_doc(target: &str, verus_conds: bool) -> Result<(), DynError> {
 /// Generate documentation for the target including all its dependencies
 fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError> {
     info!(
-        "Generating unified documentation for {} with all dependencies...",
+        "Generating documentation for {} with all dependencies...",
         target.name
     );
 
@@ -62,7 +38,7 @@ fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError
     }
 
     info!(
-        "  {} unified docs for {} and its dependencies {}",
+        "  {} docs for {} and its dependencies {}",
         "Generated".bold().green(),
         target.name.white(),
         "successfully".white()
