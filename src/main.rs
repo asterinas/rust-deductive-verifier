@@ -191,12 +191,17 @@ struct VerifyArgs {
 struct DocArgs {
     #[arg(
         short = 't',
-        long = "targets", 
-        value_parser = verus::find_target,
-        help = "The targets to generate document", 
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
+        long = "target",
+        help = "The target to generate documentation for (along with its dependencies)"
+    )]
+    target: String,
+
+    #[arg(
+        long = "verus-conds",
+        help = "Include Verus pre/post conditions in generated docs",
+        default_value = "false",
+        action = ArgAction::SetTrue)]
+    verus_conds: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -417,8 +422,8 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     verus::exec_verify(&targets, &imports, &options)
 }
 
-fn doc(_args: &DocArgs) -> Result<(), DynError> {
-    error!("The doc command is not implemented yet");
+fn doc(args: &DocArgs) -> Result<(), DynError> {
+    doc::exec_doc(&args.target, args.verus_conds)
 }
 
 fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {

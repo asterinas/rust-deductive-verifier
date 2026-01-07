@@ -1,0 +1,183 @@
+use crate::verus::{self, DynError, VerusTarget};
+use colored::Colorize;
+use std::path::Path;
+use std::process::Command;
+
+/// Generate documentation for verification targets
+pub fn exec_doc(target: &str, verus_conds: bool) -> Result<(), DynError> {
+    let target_to_use = verus::find_target(target)?;
+
+    info!(
+        "Generating documentation for target: {}",
+        target_to_use.name
+    );
+
+    // First verify the target to ensure it compiles
+    let verify_options = verus::ExtraOptions {
+        max_errors: 5,
+        log: false,
+        release: true,
+        trace: false,
+        disasm: false,
+        pass_through: vec![],
+        count_line: false,
+    };
+
+    info!(
+        "Verifying {} before generating documentation...",
+        target_to_use.name
+    );
+    verus::exec_verify(&[target_to_use.clone()], &[], &verify_options)?;
+
+    // Generate documentation for the target with all its dependencies
+    generate_docs(&target_to_use, verus_conds)?;
+    Ok(())
+}
+
+/// Generate documentation for the target including all its dependencies
+fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError> {
+    info!(
+        "Generating unified documentation for {} with all dependencies...",
+        target.name
+    );
+
+    let root_dir = verus::get_workspace_root();
+    let doc_output_dir = root_dir.join("doc");
+
+    std::fs::create_dir_all(&doc_output_dir)?;
+
+    let deps = verus::get_local_dependency(target);
+
+    for (_name, dep_target) in deps.iter() {
+        if dep_target.name != target.name {
+            generate_single_target_doc(dep_target, verus_conds, &doc_output_dir)?;
+        }
+    }
+
+    generate_single_target_doc(target, verus_conds, &doc_output_dir)?;
+
+    // Run verusdoc post-processor once at the end
+    if verus_conds {
+        run_verusdoc_postprocessor()?;
+    }
+
+    info!(
+        "  {} unified docs for {} and its dependencies {}",
+        "Generated".bold().green(),
+        target.name.white(),
+        "successfully".white()
+    );
+
+    Ok(())
+}
+
+/// Generate documentation for a single target using rustdoc
+fn generate_single_target_doc(
+    target: &VerusTarget,
+    verus_conds: bool,
+    doc_output_dir: &Path,
+) -> Result<(), DynError> {
+    info!(
+        "  {} {}",
+        "Generating docs".bold().blue(),
+        target.name.white()
+    );
+
+    let verus_target_dir = verus::get_verus_target_dir();
+    let target_dir = verus::get_target_dir();
+    let mut cmd = Command::new("rustdoc");
+
+    // Set VERUSDOC environment variable based on verus_conds flag
+    let verus_doc_value = if verus_conds { "1" } else { "0" };
+    cmd.env("VERUSDOC", verus_doc_value);
+    cmd.env("RUSTC_BOOTSTRAP", "1");
+
+    // Add extern dependencies for vstd
+    let vstd_path = verus_target_dir.join("libvstd.rlib");
+    cmd.arg("--extern")
+        .arg(format!("vstd={}", vstd_path.display()));
+
+    // Add all dependencies from .rlib files in target directory
+    let all_targets = verus::verus_targets();
+    for (_name, dep_target) in all_targets.iter() {
+        if dep_target.name != target.name {
+            // Check if .rlib file exists for this dependency
+            let rlib_path =
+                target_dir.join(format!("lib{}.rlib", dep_target.name.replace('-', "_")));
+            if rlib_path.exists() {
+                // Use the .rlib file as extern dependency
+                let extern_name = dep_target.name.replace('-', "_");
+                cmd.arg("--extern")
+                    .arg(format!("{}={}", extern_name, rlib_path.display()));
+            }
+        }
+    }
+
+    cmd.arg("-L").arg(format!("{}", verus_target_dir.display()));
+    cmd.arg("-L").arg(format!("{}", target_dir.display()));
+    cmd.arg("--edition=2021")
+        .arg("--cfg")
+        .arg("verus_keep_ghost")
+        .arg("--cfg")
+        .arg("verus_keep_ghost_body")
+        .arg("--cfg")
+        .arg("feature=\"std\"")
+        .arg("--cfg")
+        .arg("feature=\"alloc\"")
+        .arg("-Zcrate-attr=feature(stmt_expr_attributes)")
+        .arg("-Zcrate-attr=feature(register_tool)")
+        .arg("-Zcrate-attr=register_tool(verus)")
+        .arg("-Zcrate-attr=register_tool(verifier)")
+        .arg("-Zcrate-attr=register_tool(verusfmt)")
+        .arg("-Zcrate-attr=feature(rustc_attrs)")
+        .arg("-Zcrate-attr=feature(portable_simd)")
+        .arg("-Zcrate-attr=feature(negative_impls)")
+        .arg("--enable-index-page")
+        .arg("-Zunstable-options");
+
+    // Set crate type and name
+    cmd.arg("--crate-type=lib")
+        .arg(format!("--crate-name={}", target.name.replace('-', "_")));
+
+    // Set output directory
+    cmd.arg("-o").arg(&doc_output_dir);
+
+    // Add the source file
+    let source_file = target.root_file();
+    cmd.arg(&source_file);
+
+    debug!("Running rustdoc for {}: {:?}", target.name, cmd);
+
+    let status = cmd.status()?;
+    if !status.success() {
+        warn!(
+            "rustdoc failed for target: {}, but continuing...",
+            target.name
+        );
+        return Ok(()); // Continue with other targets instead of failing
+    }
+
+    info!(
+        "  {} {} {}",
+        "Generated docs".bold().green(),
+        target.name.white(),
+        "successfully".white()
+    );
+
+    Ok(())
+}
+
+fn run_verusdoc_postprocessor() -> Result<(), DynError> {
+    let verusdoc = verus::get_verusdoc(true);
+
+    info!("Running verusdoc post-processor...");
+    let status = Command::new(&verusdoc).status()?;
+
+    if !status.success() {
+        warn!("verusdoc post-processor failed");
+    } else {
+        info!("verusdoc post-processor completed successfully");
+    }
+
+    Ok(())
+}

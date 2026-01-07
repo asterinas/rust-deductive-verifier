@@ -1,5 +1,4 @@
 use crate::files;
-use crate::helper::{error, info};
 use askama::Template;
 use std::io::Write;
 use std::path::Path;
