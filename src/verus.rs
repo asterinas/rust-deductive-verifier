@@ -1492,7 +1492,7 @@ pub mod install {
         let cmd = &mut Command::new("bash");
         cmd.current_dir(verus_source_dir())
             .env_remove("RUSTUP_TOOLCHAIN")
-            .env("RUSTUP_TOOLCHAIN", toolchain_name)
+            .env("RUSTUP_TOOLCHAIN", toolchain_name.clone())
             .arg("-c")
             .arg(format!(
                 "source ../tools/activate; vargo build {} --features singular",
@@ -1507,7 +1507,7 @@ pub mod install {
         verusdoc_cmd
             .current_dir(verus_source_dir())
             .env_remove("RUSTUP_TOOLCHAIN")
-            .env("RUSTUP_TOOLCHAIN", toolchain_name.clone())
+            .env("RUSTUP_TOOLCHAIN", toolchain_name)
             .arg("-c")
             .arg("source ../tools/activate; vargo build -p verusdoc");
         debug!("{:?}", verusdoc_cmd);
