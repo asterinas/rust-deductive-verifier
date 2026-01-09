@@ -795,6 +795,58 @@ pub fn prepare(target: &VerusTarget, release: bool) {
     gen_extern_crates(target, release);
 }
 
+/// Move files from workspace `.verus-log` root into a per-crate subdirectory.
+fn move_verus_log_files(crate_name: &str) {
+    let workspace_root = get_workspace_root();
+    let verus_log_dir = workspace_root.join(".verus-log");
+    if !verus_log_dir.exists() || !verus_log_dir.is_dir() {
+        return;
+    }
+
+    let crate_dir = verus_log_dir.join(crate_name);
+    // If crate_dir exists, clear its contents; otherwise create it.
+    if crate_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&crate_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                let p = entry.path();
+                if p.is_file() {
+                    if let Err(e) = fs::remove_file(&p) {
+                        warn!("Failed to remove file {}: {}", p.display(), e);
+                    }
+                } else if p.is_dir() {
+                    if let Err(e) = fs::remove_dir_all(&p) {
+                        warn!("Failed to remove dir {}: {}", p.display(), e);
+                    }
+                }
+            }
+        }
+    } else if let Err(e) = fs::create_dir_all(&crate_dir) {
+        warn!(
+            "Failed to create crate log dir {}: {}",
+            crate_dir.display(),
+            e
+        );
+        return;
+    }
+
+    if let Ok(entries) = fs::read_dir(&verus_log_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.is_file() {
+                let dest = crate_dir.join(path.file_name().unwrap());
+                if let Err(e) = fs::rename(&path, &dest) {
+                    warn!(
+                        "Failed to move log file {} -> {}: {}",
+                        path.display(),
+                        dest.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn get_build_dir(release: bool) -> &'static str {
     if release {
         "release"
@@ -953,6 +1005,10 @@ pub fn compile_single_target(
             disassemble(target).unwrap_or_else(|e| {
                 error!("Error during disassembly: {}", e);
             });
+        }
+
+        if options.log {
+            move_verus_log_files(&target.name);
         }
 
         return Ok(());
@@ -1171,6 +1227,10 @@ pub fn exec_verify(
                 target.version.white(),
                 duration.as_secs_f64()
             );
+
+            if options.log {
+                move_verus_log_files(&target.name);
+            }
         }
 
         if options.count_line {
