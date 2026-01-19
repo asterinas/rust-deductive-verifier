@@ -62,6 +62,19 @@ fn generate_single_target_doc(
     cmd.env("VERUSDOC", verus_doc_value);
     cmd.env("RUSTC_BOOTSTRAP", "1");
 
+    // Add extern dependencies for verus_builtin
+    let builtin_path = verus_target_dir.join("libverus_builtin.rlib");
+    cmd.arg("--extern")
+        .arg(format!("verus_builtin={}", builtin_path.display()));
+
+    // Add extern dependencies for verus_builtin_macros
+    let builtin_macros_path =
+        verus_target_dir.join(format!("verus_builtin_macros{}", verus::DYN_LIB));
+    cmd.arg("--extern").arg(format!(
+        "verus_builtin_macros={}",
+        builtin_macros_path.display()
+    ));
+
     // Add extern dependencies for vstd
     let vstd_path = verus_target_dir.join("libvstd.rlib");
     cmd.arg("--extern")
