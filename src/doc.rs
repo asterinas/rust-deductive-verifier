@@ -75,20 +75,18 @@ fn generate_single_target_doc(
         builtin_macros_path.display()
     ));
 
+    // Add extern dependencies for verus_state_machine_macros
+    let state_machine_macros_path =
+        verus_target_dir.join(format!("verus_state_machine_macros{}", verus::DYN_LIB));
+    cmd.arg("--extern").arg(format!(
+        "verus_state_machine_macros={}",
+        state_machine_macros_path.display()
+    ));
+
     // Add extern dependencies for vstd
     let vstd_path = verus_target_dir.join("libvstd.rlib");
     cmd.arg("--extern")
         .arg(format!("vstd={}", vstd_path.display()));
-
-    // Add state_machines_macros dependency (proc-macro)
-    let state_machines_macros_path =
-        verus_target_dir.join(format!("verus_state_machines_macros{}", verus::DYN_LIB));
-    if state_machines_macros_path.exists() {
-        cmd.arg("--extern").arg(format!(
-            "verus_state_machines_macros={}",
-            state_machines_macros_path.display()
-        ));
-    }
 
     // Add dependencies that this target actually needs
     let deps = verus::get_local_dependency(target);
