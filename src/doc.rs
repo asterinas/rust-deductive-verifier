@@ -75,11 +75,11 @@ fn generate_single_target_doc(
         builtin_macros_path.display()
     ));
 
-    // Add extern dependencies for verus_state_machine_macros
+    // Add extern dependencies for verus_state_machines_macros
     let state_machine_macros_path =
-        verus_target_dir.join(format!("verus_state_machine_macros{}", verus::DYN_LIB));
+        verus_target_dir.join(format!("verus_state_machines_macros{}", verus::DYN_LIB));
     cmd.arg("--extern").arg(format!(
-        "verus_state_machine_macros={}",
+        "verus_state_machines_macros={}",
         state_machine_macros_path.display()
     ));
 
