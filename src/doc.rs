@@ -4,14 +4,18 @@ use std::path::Path;
 use std::process::Command;
 
 /// Generate documentation for verification targets
-pub fn exec_doc(target: &str, verus_conds: bool) -> Result<(), DynError> {
+pub fn exec_doc(target: &str, verus_conds: bool, verus_conds_debug: bool) -> Result<(), DynError> {
     let target_to_use = verus::find_target(target)?;
-    generate_docs(&target_to_use, verus_conds)?;
+    generate_docs(&target_to_use, verus_conds, verus_conds_debug)?;
     Ok(())
 }
 
 /// Generate documentation for the target including all its dependencies
-fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError> {
+fn generate_docs(
+    target: &VerusTarget,
+    verus_conds: bool,
+    verus_conds_debug: bool,
+) -> Result<(), DynError> {
     info!(
         "Generating documentation for {} with all dependencies...",
         target.name
@@ -26,11 +30,16 @@ fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError
 
     for (_name, dep_target) in deps.iter() {
         if dep_target.name != target.name {
-            generate_single_target_doc(dep_target, verus_conds, &doc_output_dir)?;
+            generate_single_target_doc(
+                dep_target,
+                verus_conds,
+                verus_conds_debug,
+                &doc_output_dir,
+            )?;
         }
     }
 
-    generate_single_target_doc(target, verus_conds, &doc_output_dir)?;
+    generate_single_target_doc(target, verus_conds, verus_conds_debug, &doc_output_dir)?;
 
     if verus_conds {
         run_verusdoc_postprocessor()?;
@@ -45,6 +54,7 @@ fn generate_docs(target: &VerusTarget, verus_conds: bool) -> Result<(), DynError
 fn generate_single_target_doc(
     target: &VerusTarget,
     verus_conds: bool,
+    verus_conds_debug: bool,
     doc_output_dir: &Path,
 ) -> Result<(), DynError> {
     info!(
@@ -57,8 +67,12 @@ fn generate_single_target_doc(
     let target_dir = verus::get_target_dir();
     let mut cmd = Command::new("rustdoc");
 
-    // Set VERUSDOC environment variable based on verus_conds flag
-    let verus_doc_value = if verus_conds { "1" } else { "0" };
+    // Set VERUSDOC environment variable based on verus_conds flags
+    let verus_doc_value = if verus_conds || verus_conds_debug {
+        "1"
+    } else {
+        "0"
+    };
     cmd.env("VERUSDOC", verus_doc_value);
     cmd.env("RUSTC_BOOTSTRAP", "1");
 
