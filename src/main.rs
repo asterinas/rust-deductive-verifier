@@ -198,7 +198,7 @@ struct DocArgs {
 
     #[arg(
         long = "no-verus-conds",
-        help = "Call normal rustdoc, exclude Verus pre/post conditions from generated docs",
+        help = "Call normal rustdoc without Verus conditions",
         default_value = "false",
         action = ArgAction::SetTrue,
         conflicts_with = "verus_conds_debug")]
@@ -206,7 +206,7 @@ struct DocArgs {
 
     #[arg(
         long = "verus-conds-debug",
-        help = "Include Verus pre/post special attributes in generated docs, but do not call verusdoc postprocessor",
+        help = "Show `verus_doc_special_attr` in generated docs without verusdoc post-processing",
         default_value = "false",
         action = ArgAction::SetTrue,
         conflicts_with = "no_verus_conds")]

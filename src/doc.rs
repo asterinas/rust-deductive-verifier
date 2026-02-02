@@ -41,7 +41,7 @@ fn generate_docs(
 
     generate_single_target_doc(target, verus_conds, verus_conds_debug, &doc_output_dir)?;
 
-    if verus_conds {
+    if verus_conds && !verus_conds_debug {
         run_verusdoc_postprocessor()?;
     }
 
