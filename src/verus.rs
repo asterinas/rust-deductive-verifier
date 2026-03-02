@@ -1444,8 +1444,7 @@ pub mod install {
 
         info!(
             "Switching origin remote from {} to {}",
-            origin_url,
-            target_url
+            origin_url, target_url
         );
         repo.remote_set_url("origin", target_url)?;
 
@@ -1490,11 +1489,7 @@ pub mod install {
         })?;
         let upstream_commit = upstream_ref.peel_to_commit()?;
 
-        repo.reset(
-            upstream_commit.as_object(),
-            git2::ResetType::Hard,
-            None,
-        )?;
+        repo.reset(upstream_commit.as_object(), git2::ResetType::Hard, None)?;
 
         let refname = format!("refs/heads/{}", target_branch);
         if repo.find_reference(&refname).is_err() {
@@ -1546,7 +1541,11 @@ pub mod install {
         tools_dir().join("patches")
     }
 
-    pub fn clone_repo(verus_dir: &Path, branch: Option<&str>, upstream: bool) -> Result<(), DynError> {
+    pub fn clone_repo(
+        verus_dir: &Path,
+        branch: Option<&str>,
+        upstream: bool,
+    ) -> Result<(), DynError> {
         let repo_ssh = if upstream {
             UPSTREAM_VERUS_REPO_SSH
         } else {
@@ -1589,7 +1588,8 @@ pub mod install {
 
         let mut builder_https = git2::build::RepoBuilder::new();
         builder_https.branch(branch_name);
-        builder_https.clone(repo_https, verus_dir)
+        builder_https
+            .clone(repo_https, verus_dir)
             .map_err(|e| format!("Failed to clone verus repo: {}", e))?;
 
         Ok(())
@@ -1746,7 +1746,11 @@ pub mod install {
 
         // Clone the Verus repo if it doesn't exist
         if !verus_dir.exists() {
-            clone_repo(&verus_dir, options.branch.as_deref(), options.upstream_verus)?;
+            clone_repo(
+                &verus_dir,
+                options.branch.as_deref(),
+                options.upstream_verus,
+            )?;
         }
 
         // Download Z3
