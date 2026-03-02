@@ -1402,10 +1402,13 @@ pub mod install {
         pub release: bool,
         pub branch: Option<String>,
         pub force_reset: bool,
+        pub upstream_verus: bool,
     }
 
     pub const VERUS_REPO_HTTPS: &str = "https://github.com/asterinas/verus.git";
     pub const VERUS_REPO_SSH: &str = "git@github.com:asterinas/verus.git";
+    pub const UPSTREAM_VERUS_REPO_HTTPS: &str = "https://github.com/verus-lang/verus.git";
+    pub const UPSTREAM_VERUS_REPO_SSH: &str = "git@github.com:verus-lang/verus.git";
 
     #[memoize]
     pub fn tools_dir() -> PathBuf {
@@ -1427,8 +1430,23 @@ pub mod install {
         tools_dir().join("patches")
     }
 
-    pub fn clone_repo(verus_dir: &Path) -> Result<(), DynError> {
-        info!("Cloning Verus repo to {} ...", verus_dir.display());
+    pub fn clone_repo(verus_dir: &Path, upstream: bool) -> Result<(), DynError> {
+        let repo_ssh = if upstream {
+            UPSTREAM_VERUS_REPO_SSH
+        } else {
+            VERUS_REPO_SSH
+        };
+        let repo_https = if upstream {
+            UPSTREAM_VERUS_REPO_HTTPS
+        } else {
+            VERUS_REPO_HTTPS
+        };
+
+        info!(
+            "Cloning Verus repo from {} to {} ...",
+            repo_ssh,
+            verus_dir.display()
+        );
 
         let mut builder = git2::build::RepoBuilder::new();
         let mut callbacks = git2::RemoteCallbacks::new();
@@ -1441,12 +1459,13 @@ pub mod install {
         fetch_opts.remote_callbacks(callbacks);
         builder.fetch_options(fetch_opts);
 
-        let ssh_result = builder.clone(VERUS_REPO_SSH, verus_dir);
+        let ssh_result = builder.clone(repo_ssh, verus_dir);
         if ssh_result.is_ok() {
             return Ok(());
         }
 
-        Repository::clone(VERUS_REPO_HTTPS, verus_dir)
+        info!("SSH failed, trying HTTPS: {}", repo_https);
+        Repository::clone(repo_https, verus_dir)
             .map_err(|e| format!("Failed to clone verus repo: {}", e))?;
 
         Ok(())
@@ -1607,7 +1626,7 @@ pub mod install {
 
         // Clone the Verus repo if it doesn't exist
         if !verus_dir.exists() {
-            clone_repo(&verus_dir)?;
+            clone_repo(&verus_dir, options.upstream_verus)?;
         }
 
         // Download Z3
@@ -1804,7 +1823,7 @@ pub mod install {
 
     pub fn exec_upgrade(options: &VerusInstallOpts) -> Result<(), DynError> {
         // rebuild if required or if the directory doesn't exist
-        if options.restart || !verus_dir().exists() {
+        if !verus_dir().exists() {
             return exec_bootstrap(options);
         }
 
