@@ -1410,6 +1410,122 @@ pub mod install {
     pub const UPSTREAM_VERUS_REPO_HTTPS: &str = "https://github.com/verus-lang/verus.git";
     pub const UPSTREAM_VERUS_REPO_SSH: &str = "git@github.com:verus-lang/verus.git";
 
+    fn target_repo_urls(upstream: bool) -> (&'static str, &'static str) {
+        if upstream {
+            (UPSTREAM_VERUS_REPO_SSH, UPSTREAM_VERUS_REPO_HTTPS)
+        } else {
+            (VERUS_REPO_SSH, VERUS_REPO_HTTPS)
+        }
+    }
+
+    fn is_target_origin(origin_url: &str, upstream: bool) -> bool {
+        let (ssh, https) = target_repo_urls(upstream);
+        origin_url == ssh || origin_url == https
+    }
+
+    fn maybe_switch_origin_remote(dir: &Path, upstream: bool) -> Result<bool, DynError> {
+        let repo = Repository::open(dir).unwrap_or_else(|e| {
+            error!(
+                "Unable to find the git repo of verus under {}: {}",
+                dir.display(),
+                e
+            );
+        });
+
+        let mut remote = repo.find_remote("origin")?;
+        let origin_url = remote.url().unwrap_or("");
+        if is_target_origin(origin_url, upstream) {
+            return Ok(false);
+        }
+
+        let (target_ssh, target_https) = target_repo_urls(upstream);
+        let use_ssh = origin_url.starts_with("git@") || origin_url.contains("ssh://");
+        let target_url = if use_ssh { target_ssh } else { target_https };
+
+        info!(
+            "Switching origin remote from {} to {}",
+            origin_url,
+            target_url
+        );
+        repo.remote_set_url("origin", target_url)?;
+
+        // Refresh local remote handle after remote update.
+        remote = repo.find_remote("origin")?;
+        debug!("Updated origin remote URL: {}", remote.url().unwrap_or(""));
+        Ok(true)
+    }
+
+    fn force_reset_to_origin(dir: &Path, branch: Option<&str>) -> Result<(), DynError> {
+        let repo = Repository::open(dir).unwrap_or_else(|e| {
+            error!(
+                "Unable to find the git repo of verus under {}: {}",
+                dir.display(),
+                e
+            );
+        });
+
+        let target_branch = branch.unwrap_or("main");
+
+        let mut remote = repo.find_remote("origin")?;
+        let remote_url = remote.url().unwrap_or("");
+        let is_ssh = remote_url.starts_with("git@") || remote_url.contains("ssh://");
+
+        let mut callbacks = git2::RemoteCallbacks::new();
+        if is_ssh {
+            callbacks.credentials(|_url, username_from_url, _allowed_types| {
+                git2::Cred::ssh_key_from_agent(username_from_url.unwrap_or("git"))
+            });
+        }
+
+        let mut fetch_opts = git2::FetchOptions::new();
+        fetch_opts.remote_callbacks(callbacks);
+        remote.fetch(&[target_branch], Some(&mut fetch_opts), None)?;
+
+        let upstream_branch = format!("refs/remotes/origin/{}", target_branch);
+        let upstream_ref = repo.find_reference(&upstream_branch).map_err(|_| {
+            format!(
+                "Branch '{}' does not exist in the remote repository. Please check the branch name.",
+                target_branch
+            )
+        })?;
+        let upstream_commit = upstream_ref.peel_to_commit()?;
+
+        repo.reset(
+            upstream_commit.as_object(),
+            git2::ResetType::Hard,
+            None,
+        )?;
+
+        let refname = format!("refs/heads/{}", target_branch);
+        if repo.find_reference(&refname).is_err() {
+            repo.reference(
+                &refname,
+                upstream_commit.id(),
+                false,
+                &format!("Create branch {}", target_branch),
+            )?;
+        } else {
+            let mut reference = repo.find_reference(&refname)?;
+            reference.set_target(
+                upstream_commit.id(),
+                &format!("Force reset to origin/{}", target_branch),
+            )?;
+        }
+
+        repo.set_head(&refname)?;
+        let mut checkout_opts = git2::build::CheckoutBuilder::new();
+        checkout_opts.force();
+        repo.checkout_head(Some(&mut checkout_opts))?;
+
+        status!("Force reset to origin/{} completed", target_branch);
+        status!(
+            "Repo {} updated to commit {}",
+            dir.display(),
+            upstream_commit.id()
+        );
+        Ok(())
+    }
+
     #[memoize]
     pub fn tools_dir() -> PathBuf {
         projects::get_root().join("tools")
@@ -1833,11 +1949,13 @@ pub mod install {
 
         // git pull the Verus repo
         let verus_dir = verus_dir();
-        git_pull(
-            &verus_dir,
-            options.branch.as_ref().map(|s| s.as_str()),
-            options.force_reset,
-        )?;
+        let branch = options.branch.as_ref().map(|s| s.as_str());
+        let switched = maybe_switch_origin_remote(&verus_dir, options.upstream_verus)?;
+        if switched {
+            force_reset_to_origin(&verus_dir, branch)?;
+        } else {
+            git_pull(&verus_dir, branch, options.force_reset)?;
+        }
         status!("Verus repo updated to the latest version");
 
         // Build Verus
