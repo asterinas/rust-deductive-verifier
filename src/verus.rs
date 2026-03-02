@@ -1430,7 +1430,7 @@ pub mod install {
         tools_dir().join("patches")
     }
 
-    pub fn clone_repo(verus_dir: &Path, upstream: bool) -> Result<(), DynError> {
+    pub fn clone_repo(verus_dir: &Path, branch: Option<&str>, upstream: bool) -> Result<(), DynError> {
         let repo_ssh = if upstream {
             UPSTREAM_VERUS_REPO_SSH
         } else {
@@ -1442,13 +1442,18 @@ pub mod install {
             VERUS_REPO_HTTPS
         };
 
+        let branch_name = branch.unwrap_or("main");
+
         info!(
-            "Cloning Verus repo from {} to {} ...",
+            "Cloning Verus repo from {} (branch: {}) to {} ...",
             repo_ssh,
+            branch_name,
             verus_dir.display()
         );
 
         let mut builder = git2::build::RepoBuilder::new();
+        builder.branch(branch_name);
+
         let mut callbacks = git2::RemoteCallbacks::new();
 
         callbacks.credentials(|_url, username_from_url, _allowed_types| {
@@ -1465,7 +1470,10 @@ pub mod install {
         }
 
         info!("SSH failed, trying HTTPS: {}", repo_https);
-        Repository::clone(repo_https, verus_dir)
+
+        let mut builder_https = git2::build::RepoBuilder::new();
+        builder_https.branch(branch_name);
+        builder_https.clone(repo_https, verus_dir)
             .map_err(|e| format!("Failed to clone verus repo: {}", e))?;
 
         Ok(())
@@ -1615,10 +1623,6 @@ pub mod install {
     pub fn exec_bootstrap(options: &VerusInstallOpts) -> Result<(), DynError> {
         let verus_dir = verus_dir();
 
-        if options.branch.is_some() {
-            error!("Specifying a branch is only supported during upgrade.");
-        }
-
         if options.restart && verus_dir.exists() {
             info!("Removing old verus installation...");
             std::fs::remove_dir_all(&verus_dir)?;
@@ -1626,7 +1630,7 @@ pub mod install {
 
         // Clone the Verus repo if it doesn't exist
         if !verus_dir.exists() {
-            clone_repo(&verus_dir, options.upstream_verus)?;
+            clone_repo(&verus_dir, options.branch.as_deref(), options.upstream_verus)?;
         }
 
         // Download Z3

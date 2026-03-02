@@ -120,7 +120,7 @@ struct BootstrapArgs {
 
     #[arg(
         long = "branch",
-        help = "The branch name to pull (only used with --upgrade)",
+        help = "The branch name to pull",
         value_name = "BRANCH_NAME"
     )]
     branch: Option<String>,
