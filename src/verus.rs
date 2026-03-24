@@ -235,6 +235,50 @@ pub struct ExtraOptions {
     pub pass_through: Vec<String>,
     /// count lines of code
     pub count_line: bool,
+    /// verify-only-module should only apply to the main target, not its dependencies
+    pub verify_only_module_main_only: bool,
+}
+
+impl ExtraOptions {
+    /// Create a modified version of options for dependency compilation
+    /// If verify_only_module_main_only is true, removes the verify-only-module parameter
+    /// since it should only apply to the main target
+    pub fn for_dependency(&self) -> Self {
+        let pass_through = if self.verify_only_module_main_only {
+            let mut filtered = Vec::new();
+            let mut skip_next = false;
+
+            for arg in self.pass_through.iter() {
+                if skip_next {
+                    skip_next = false;
+                    continue;
+                }
+
+                if arg == "--verify-only-module" {
+                    // Skip this argument and the next one (the module name)
+                    skip_next = true;
+                } else if arg.starts_with("--verify-only-module=") {
+                    // Skip inline form: --verify-only-module=<path>
+                } else {
+                    filtered.push(arg.clone());
+                }
+            }
+            filtered
+        } else {
+            self.pass_through.clone()
+        };
+
+        ExtraOptions {
+            log: self.log,
+            trace: self.trace,
+            release: self.release,
+            max_errors: self.max_errors,
+            disasm: self.disasm,
+            pass_through,
+            count_line: self.count_line,
+            verify_only_module_main_only: self.verify_only_module_main_only,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1062,7 +1106,8 @@ pub fn compile_target_with_dependencies(
 
     // Then compile this target if it's in scope
     if scope_targets.contains_key(&target.name) {
-        compile_single_target(target, &vec![], options).unwrap_or_else(|e| {
+        let target_options = options.for_dependency();
+        compile_single_target(target, &vec![], &target_options).unwrap_or_else(|e| {
             error!(
                 "Unable to build the dependent proof: `{}` ({})",
                 target.name, e

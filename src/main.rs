@@ -435,6 +435,13 @@ struct FmtArgs {
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
     let imports = args.imports.clone();
+    // verify-only-module should only apply to the main target
+    // Conditions: exactly one target AND pass_through contains "--verify-only-module"
+    let verify_only_module_main_only = targets.len() == 1
+        && args
+            .pass_through
+            .iter()
+            .any(|arg| arg == "--verify-only-module" || arg.starts_with("--verify-only-module="));
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
         log: args.log,
@@ -443,6 +450,7 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         disasm: false,
         pass_through: args.pass_through.clone(),
         count_line: args.count_line,
+        verify_only_module_main_only,
     };
 
     verus::exec_verify(&targets, &imports, &options)
@@ -484,6 +492,7 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         disasm: args.disasm,
         pass_through: args.pass_through.clone(),
         count_line: false,
+        verify_only_module_main_only: false,
     };
 
     verus::exec_compile(&targets, &imports, &options)
