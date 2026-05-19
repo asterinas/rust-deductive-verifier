@@ -23,11 +23,11 @@ name = "rust_dv"
 path = "src/lib.rs"
 
 [dependencies]
-clap = {version = "4.5.35", features = ["derive"]}
-cargo_metadata = {version = "*" }
+clap = { version = "4.5.35", features = ["derive"] }
+cargo_metadata = { version = "*" }
 memoize = { version = "*" }
-colored ={ version = "*" }
-git2 = { version = "0.21.0" }
+colored = { version = "*" }
+git2 = { version = "0.21.0", features = ["https", "ssh"] }
 # cargo_toml = { version = "*" }
 # relative-path = { version = "*" }
 project-root = { version = "*" }
