@@ -99,11 +99,20 @@ pub fn format_vostd(targets: &Vec<String>) {
     };
 
     for package in fmt_packages {
-        for target in package.targets {
-            let path = target.src_path;
+        for target in &package.targets {
+            let path = &target.src_path;
             let src_dir = path.parent().unwrap().as_std_path();
             let rust_files = collect_rust_files_from_dir(src_dir);
             run_verusfmt_on_files(&rust_files, &verusfmt);
+        }
+
+        if package.name == "ostd" {
+            let specs_dir = package.manifest_path.parent().unwrap().join("specs");
+            if specs_dir.exists() {
+                let rust_files = collect_rust_files_from_dir(specs_dir.as_std_path());
+                run_rustfmt_on_files(&rust_files);
+                run_verusfmt_on_files(&rust_files, &verusfmt);
+            }
         }
     }
 }
