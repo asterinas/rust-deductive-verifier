@@ -10,6 +10,8 @@ use walkdir::WalkDir;
 
 use crate::{executable, helper::DynError, verus};
 
+const VERUSFMT_MIN_EDITION_VERSION: &str = "0.7.1";
+
 fn get_verusfmt_path() -> Result<PathBuf, DynError> {
     executable::locate(verus::VERUSFMT_BIN, None, &Vec::<PathBuf>::new()).ok_or(
         "Cannot find the Verusfmt binary, please install it by running `cargo dv bootstrap`".into(),
@@ -41,15 +43,26 @@ fn run_formatter_on_files(files: &[PathBuf], formatter: &str, formatter_path: Op
             Command::new(formatter)
         };
 
-        let status = cmd.arg(file).status();
+        if formatter == "verusfmt" {
+            cmd.args(["--edition", "2024"]);
+        }
 
-        match status {
-            Ok(status) if status.success() => {}
-            Ok(_) => {
+        let output = cmd.arg(file).output();
+
+        match output {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
                 if formatter == "rustfmt" {
                     eprintln!("Warning: {} failed for file: {}", formatter, file.display());
+                    print_command_output(&output.stdout, &output.stderr);
+                } else if verusfmt_refused_edition_arg(&output.stdout, &output.stderr) {
+                    eprintln!(
+                        "verusfmt failed because it does not support `--edition`. Please update verusfmt to >= {}.",
+                        VERUSFMT_MIN_EDITION_VERSION
+                    );
                 } else {
                     eprintln!("Failed to format file: {}, skipping", file.display());
+                    print_command_output(&output.stdout, &output.stderr);
                 }
             }
             Err(e) => {
@@ -62,6 +75,31 @@ fn run_formatter_on_files(files: &[PathBuf], formatter: &str, formatter_path: Op
             }
         }
     });
+}
+
+fn print_command_output(stdout: &[u8], stderr: &[u8]) {
+    if !stdout.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(stdout));
+    }
+    if !stderr.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(stderr));
+    }
+}
+
+fn verusfmt_refused_edition_arg(stdout: &[u8], stderr: &[u8]) -> bool {
+    let output = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(stdout),
+        String::from_utf8_lossy(stderr)
+    )
+    .to_lowercase();
+
+    output.contains("--edition")
+        && (output.contains("unexpected")
+            || output.contains("unrecognized")
+            || output.contains("unknown")
+            || output.contains("not expected")
+            || output.contains("invalid argument"))
 }
 
 fn run_rustfmt_on_files(files: &[PathBuf]) {
