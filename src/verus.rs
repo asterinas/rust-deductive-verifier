@@ -526,7 +526,7 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
 
         // check if the package has a target
         if let Some(target) = package.targets.first() {
-            let name = package.name.as_str().to_string();
+            let name = package.name.as_str().replace('-', "_");
             let version = package.version.to_string();
             let dir = Path::new(&package.manifest_path)
                 .parent()
