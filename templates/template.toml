@@ -3,11 +3,11 @@ git = "https://github.com/asterinas/asterinas.git"
 tag = "v0.16.0"
 
 [[modules]]
-name = "mm"
-path = "modules/mm.toml"
-source = "../../ostd/src/mm"
+name = "rcu"
+path = "/home/xxx/asterinas-fv/tools/alignment-checker/modules/rcu.toml"
+source = "/home/xxx/asterinas-fv/ostd/src/sync/rcu"
 
 [[modules]]
-name = "rcu"
-path = "modules/rcu.toml"
-source = "../../ostd/src/sync/rcu"
+name = "mm"
+path = "/home/xxx/asterinas-fv/tools/alignment-checker/modules/mm.toml"
+source = "/home/xxx/asterinas-fv/ostd/src/mm"
