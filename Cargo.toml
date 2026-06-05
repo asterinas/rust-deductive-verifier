@@ -50,6 +50,7 @@ hex = { version = "*" }
 toml_edit = { version = "*" }
 
 syn = { version = "2", features = ["full", "extra-traits"] }
+verus_syn = { git = "https://github.com/verus-lang/verus.git", features = ["full", "parsing", "printing", "clone-impls"] }
 quote = { version = "*" }
 proc-macro2 = { version = "*" }
 

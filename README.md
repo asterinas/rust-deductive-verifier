@@ -22,6 +22,13 @@ pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 cargo dv verify --targets <target1> <target2> ...
 ```
 
+To check exec API alignment against an anchor repository, use the integrated
+alignment checker:
+
+```bash
+cargo dv alignment-check -i [path/to/config/toml]
+```
+
 Optionally, if you want to use the pre-commit hook, you can add the rusty-hook to your project:
 
 ```bash
@@ -37,4 +44,3 @@ pre-commit = "cargo pre-commit"
 [logging]
 verbose = true
 ```
-

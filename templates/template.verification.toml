@@ -1,0 +1,29 @@
+# Initial checker semantics:
+# These sections declare exec function existence/signature deltas against the anchor.
+# Functions with only body/proof/spec changes should not be listed here.
+# - [[planned]] allows added/removed/signature-changed deltas.
+# - [[unsupported]] declares exec APIs that are intentionally not verified. It
+#   allows added/removed/signature-changed deltas and may use optional
+#   `anchor = "old::Api::name"` to map renamed/moved APIs.
+# - [[verified]] declares a verified exec API. `name` is resolved in the
+#   current repo. Optional `anchor = "old::Api::name"` maps it to a differently
+#   named exec API in the anchor, e.g. trait method -> inherent method.
+#   Verified current functions must not have `#[verifier::external_body]`.
+#   Without `how`, or with `how = "same-signature"`, current and anchor
+#   signatures must match. `how = "rewrite"` is for intentional signature
+#   changes, including current-only APIs verified through a rewrite or
+#   replacement.
+
+[[unsupported]]
+name = "VmSpace::activate"
+type = "function"
+reason = "lack-hardware-support"
+
+[[verified]]
+name = "VmSpace::cursor_mut"
+type = "function"
+# how = "same-signature"
+
+[[planned]]
+name = "VmSpace::deactivate"
+type = "function"

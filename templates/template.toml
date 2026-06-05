@@ -1,0 +1,13 @@
+[anchor]
+git = "https://github.com/asterinas/asterinas.git"
+tag = "v0.16.0"
+
+[[modules]]
+name = "mm"
+path = "modules/mm.toml"
+source = "../../ostd/src/mm"
+
+[[modules]]
+name = "rcu"
+path = "modules/rcu.toml"
+source = "../../ostd/src/sync/rcu"
