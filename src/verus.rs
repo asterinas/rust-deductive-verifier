@@ -262,7 +262,7 @@ pub struct ExtraOptions {
 }
 
 impl ExtraOptions {
-    /// Create a modified version of options for dependency compilation
+    /// Create a modified version of options for dependency builds
     /// If verify_only_module_main_only is true, removes the verify-only-module parameter
     /// since it should only apply to the main target
     pub fn for_dependency(&self) -> Self {
@@ -955,7 +955,7 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     Ok(())
 }
 
-pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
+pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
         cmd.arg("build");
@@ -987,25 +987,25 @@ pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(
 
         info!(
             "  {} {} {}",
-            "Compiling".bold().green(),
+            "Building".bold().green(),
             target_name.white(),
             target_version.white()
         );
         debug!(">> {:?}", cmd);
 
         let status = cmd.status().unwrap_or_else(|e| {
-            error!("Error during compilation: {}", e);
+            error!("Error during build: {}", e);
         });
 
         if status.success() {
             info!(
                 "  {} {} {}",
-                "Compiled".bold().green(),
+                "Built".bold().green(),
                 target_name.white(),
                 target_version.white()
             );
         } else {
-            error!("Compilation failed for target {}", target_name);
+            error!("Build failed for target {}", target_name);
         }
 
         Ok(())

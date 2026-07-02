@@ -115,7 +115,7 @@ fn generate_single_target_doc(
     ));
 
     // Prefer the Cargo-built vstd when available so rustdoc uses the same crate
-    // instance as compiled local dependencies.
+    // instance as built local dependencies.
     let vstd_path = find_dependency_artifact(&target_dir, "vstd")
         .unwrap_or_else(|| verus_target_dir.join("libvstd.rlib"));
     cmd.arg("--extern")
@@ -131,7 +131,7 @@ fn generate_single_target_doc(
                     .arg(format!("{}={}", extern_name, rlib_path.display()));
             } else {
                 return Err(format!(
-                    "Missing compiled dependency '{}' for target '{}'.\n\nPlease run:\n  cargo dv verify",
+                    "Missing built dependency '{}' for target '{}'.\n\nPlease run:\n  cargo dv build",
                     dep_target.name, target.name
                 ).into());
             }
