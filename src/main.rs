@@ -46,7 +46,7 @@ enum Commands {
 
     #[command(
         name = "clean",
-        about = "Clean build artefacts produced by `cargo dv compile`",
+        about = "Run `cargo clean` for the workspace",
         alias = "cl"
     )]
     Clean(CleanArgs),
@@ -181,6 +181,15 @@ struct VerifyArgs {
     debug: bool,
 
     #[arg(
+        short = 'f',
+        long = "focus",
+        help = "Verify root crates without re-checking dependency proofs",
+        default_value = "false",
+        action = ArgAction::SetTrue
+    )]
+    focus: bool,
+
+    #[arg(
         last = true,
         help = "Pass-through arguments to the Verus verifier",
         allow_hyphen_values = true
@@ -300,22 +309,7 @@ struct CompileArgs {
 }
 
 #[derive(Parser, Debug)]
-struct CleanArgs {
-    #[arg(
-        short = 't',
-        long = "targets",
-        value_parser = verus::find_target,
-        help = "The targets to clean",
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
-    #[arg(
-        long = "all",
-        help = "Clean verification artifacts for all workspace targets",
-        default_value = "false",
-        action = ArgAction::SetTrue)]
-    all: bool,
-}
+struct CleanArgs {}
 
 #[derive(Parser, Debug)]
 struct FingerprintArgs {
@@ -434,7 +428,6 @@ struct FmtArgs {
 
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    let imports = args.imports.clone();
     // verify-only-module should only apply to the main target
     // Conditions: exactly one target AND pass_through contains "--verify-only-module"
     let verify_only_module_main_only = targets.len() == 1
@@ -450,10 +443,11 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         disasm: false,
         pass_through: args.pass_through.clone(),
         count_line: args.count_line,
+        focus: args.focus,
         verify_only_module_main_only,
     };
 
-    verus::exec_verify(&targets, &imports, &options)
+    verus::exec_verify(&targets, &options)
 }
 
 fn doc(args: &DocArgs) -> Result<(), DynError> {
@@ -483,7 +477,6 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
 
 fn compile(args: &CompileArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    let imports = args.imports.clone();
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
         log: args.log,
@@ -492,10 +485,11 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         disasm: args.disasm,
         pass_through: args.pass_through.clone(),
         count_line: false,
+        focus: false,
         verify_only_module_main_only: false,
     };
 
-    verus::exec_compile(&targets, &imports, &options)
+    verus::exec_compile(&targets, &options)
 }
 
 fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
@@ -506,14 +500,8 @@ fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
     Ok(())
 }
 
-fn clean(args: &CleanArgs) -> Result<(), DynError> {
-    let targets = args.targets.clone();
-    // if --all provided, pass empty targets with all=true to verus
-    if args.all {
-        verus::exec_clean(&[], true)
-    } else {
-        verus::exec_clean(&targets, false)
-    }
+fn clean(_args: &CleanArgs) -> Result<(), DynError> {
+    verus::exec_clean()
 }
 
 fn list_targets(_args: &ListTargetsArgs) -> Result<(), DynError> {
