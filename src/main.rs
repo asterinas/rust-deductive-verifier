@@ -46,7 +46,7 @@ enum Commands {
 
     #[command(
         name = "clean",
-        about = "Clean build artefacts produced by `cargo dv compile`",
+        about = "Run `cargo clean` for the workspace",
         alias = "cl"
     )]
     Clean(CleanArgs),
@@ -309,22 +309,7 @@ struct CompileArgs {
 }
 
 #[derive(Parser, Debug)]
-struct CleanArgs {
-    #[arg(
-        short = 't',
-        long = "targets",
-        value_parser = verus::find_target,
-        help = "The targets to clean",
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
-    #[arg(
-        long = "all",
-        help = "Clean verification artifacts for all workspace targets",
-        default_value = "false",
-        action = ArgAction::SetTrue)]
-    all: bool,
-}
+struct CleanArgs {}
 
 #[derive(Parser, Debug)]
 struct FingerprintArgs {
@@ -515,14 +500,8 @@ fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
     Ok(())
 }
 
-fn clean(args: &CleanArgs) -> Result<(), DynError> {
-    let targets = args.targets.clone();
-    // if --all provided, pass empty targets with all=true to verus
-    if args.all {
-        verus::exec_clean(&[], true)
-    } else {
-        verus::exec_clean(&targets, false)
-    }
+fn clean(_args: &CleanArgs) -> Result<(), DynError> {
+    verus::exec_clean()
 }
 
 fn list_targets(_args: &ListTargetsArgs) -> Result<(), DynError> {

@@ -983,65 +983,13 @@ pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(
     Ok(())
 }
 
-/// Clean build artefacts produced by `exec_compile`.
-pub fn exec_clean(targets: &[VerusTarget], all: bool) -> Result<(), DynError> {
-    let out_dir = get_target_dir();
-
-    let to_clean: Vec<VerusTarget> = if all || targets.is_empty() {
-        // clean all known targets
-        verus_targets().values().cloned().collect()
+pub fn exec_clean() -> Result<(), DynError> {
+    let status = Command::new("cargo").arg("clean").status()?;
+    if status.success() {
+        Ok(())
     } else {
-        targets.iter().cloned().collect()
-    };
-
-    for target in to_clean.iter() {
-        // remove .verusdata
-        let proof = target.library_proof();
-        if proof.exists() {
-            info!("Removing {}", proof.display());
-            std::fs::remove_file(&proof).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", proof.display(), e);
-            });
-        }
-
-        // remove .verusdata.timestamp
-        let proof_ts = target.library_proof_timestamp();
-        if proof_ts.exists() {
-            info!("Removing {}", proof_ts.display());
-            std::fs::remove_file(&proof_ts).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", proof_ts.display(), e);
-            });
-        }
-
-        // remove lib{name}.rlib
-        let lib = target.library_path();
-        if lib.exists() {
-            info!("Removing {}", lib.display());
-            std::fs::remove_file(&lib).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", lib.display(), e);
-            });
-        }
-
-        // remove generated extern_crates
-        let extern_crates_path = out_dir.join(format!("{}.extern_crates.rs", target.name));
-        if extern_crates_path.exists() {
-            info!("Removing {}", extern_crates_path.display());
-            std::fs::remove_file(&extern_crates_path).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", extern_crates_path.display(), e);
-            });
-        }
-
-        // remove deps.toml
-        let deps_toml_path = out_dir.join(format!("{}.deps.toml", target.name));
-        if deps_toml_path.exists() {
-            info!("Removing {}", deps_toml_path.display());
-            std::fs::remove_file(&deps_toml_path).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", deps_toml_path.display(), e);
-            });
-        }
+        Err("cargo clean failed".into())
     }
-
-    Ok(())
 }
 
 pub mod install {
