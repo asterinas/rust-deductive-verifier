@@ -2,7 +2,6 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::fs::{self, File};
 use std::hash::Hash;
 use std::io::{Read, Write};
@@ -822,6 +821,15 @@ pub fn exec_verify(
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
     for target in targets.iter() {
+        if options.count_line {
+            eprintln!(
+                "Error: --count-line is currently unsupported with cargo-verus for target {}",
+                target.name
+            );
+            // TODO: Re-enable this path once cargo-verus can produce the dep-info expected by Verus' line_count tool.
+            return Err("--count-line is currently unsupported with cargo-verus".into());
+        }
+
         let ts_start = Instant::now();
         let cmd = &mut Command::new(get_cargo_verus(options.release));
         cmd.arg(if options.focus { "focus" } else { "verify" })
@@ -878,9 +886,9 @@ pub fn exec_verify(
         if options.count_line {
             let verus_root = install::verus_dir();
             let line_count_dir = verus_root.join("source/tools/line_count");
-            let current_dir = env::current_dir()?;
+            let current_dir = std::env::current_dir()?;
             let dependency_file = current_dir.join("lib.d");
-            env::set_current_dir(&line_count_dir)?;
+            std::env::set_current_dir(&line_count_dir)?;
             let mut cargo_cmd = Command::new("cargo");
             cargo_cmd
                 .arg("run")
@@ -890,7 +898,7 @@ pub fn exec_verify(
 
             println!("Counting lines for target: {}", target.name);
             let line_count_result = cargo_cmd.status();
-            env::set_current_dir(current_dir)?;
+            std::env::set_current_dir(current_dir)?;
             line_count_result?;
             fs::remove_file(&dependency_file)?;
         }
@@ -935,13 +943,6 @@ pub fn exec_compile(
     _imports: &[VerusTarget],
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
-    let out_dir = get_target_dir();
-    if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            error!("Error creating target directory: {}", e);
-        });
-    }
-
     for target in targets.iter() {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
         cmd.arg("build").arg("-p").arg(&target.name);
