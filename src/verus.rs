@@ -956,9 +956,12 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
 }
 
 pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
-    for target in targets.iter() {
+    let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
-        cmd.arg("build").arg("-p").arg(&target.name);
+        cmd.arg("build");
+        if let Some(target) = target {
+            cmd.arg("-p").arg(&target.name);
+        }
         if options.release {
             cmd.arg("--release");
         }
@@ -977,11 +980,16 @@ pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(
             cmd.arg("--").args(verus_args);
         }
 
+        let target_name = target
+            .map(|target| target.name.as_str())
+            .unwrap_or("workspace");
+        let target_version = target.map(|target| target.version.as_str()).unwrap_or("");
+
         info!(
             "  {} {} {}",
             "Compiling".bold().green(),
-            target.name.white(),
-            target.version.white()
+            target_name.white(),
+            target_version.white()
         );
         debug!(">> {:?}", cmd);
 
@@ -993,11 +1001,21 @@ pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(
             info!(
                 "  {} {} {}",
                 "Compiled".bold().green(),
-                target.name.white(),
-                target.version.white()
+                target_name.white(),
+                target_version.white()
             );
         } else {
-            error!("Compilation failed for target {}", target.name);
+            error!("Compilation failed for target {}", target_name);
+        }
+
+        Ok(())
+    };
+
+    if targets.is_empty() {
+        run(None)?;
+    } else {
+        for target in targets.iter() {
+            run(Some(target))?;
         }
     }
 
