@@ -262,7 +262,7 @@ pub struct ExtraOptions {
 }
 
 impl ExtraOptions {
-    /// Create a modified version of options for dependency compilation
+    /// Create a modified version of options for dependency builds
     /// If verify_only_module_main_only is true, removes the verify-only-module parameter
     /// since it should only apply to the main target
     pub fn for_dependency(&self) -> Self {
@@ -955,10 +955,13 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     Ok(())
 }
 
-pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
-    for target in targets.iter() {
+pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
+    let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
-        cmd.arg("build").arg("-p").arg(&target.name);
+        cmd.arg("build");
+        if let Some(target) = target {
+            cmd.arg("-p").arg(&target.name);
+        }
         if options.release {
             cmd.arg("--release");
         }
@@ -977,27 +980,42 @@ pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(
             cmd.arg("--").args(verus_args);
         }
 
+        let target_name = target
+            .map(|target| target.name.as_str())
+            .unwrap_or("workspace");
+        let target_version = target.map(|target| target.version.as_str()).unwrap_or("");
+
         info!(
             "  {} {} {}",
-            "Compiling".bold().green(),
-            target.name.white(),
-            target.version.white()
+            "Building".bold().green(),
+            target_name.white(),
+            target_version.white()
         );
         debug!(">> {:?}", cmd);
 
         let status = cmd.status().unwrap_or_else(|e| {
-            error!("Error during compilation: {}", e);
+            error!("Error during build: {}", e);
         });
 
         if status.success() {
             info!(
                 "  {} {} {}",
-                "Compiled".bold().green(),
-                target.name.white(),
-                target.version.white()
+                "Built".bold().green(),
+                target_name.white(),
+                target_version.white()
             );
         } else {
-            error!("Compilation failed for target {}", target.name);
+            error!("Build failed for target {}", target_name);
+        }
+
+        Ok(())
+    };
+
+    if targets.is_empty() {
+        run(None)?;
+    } else {
+        for target in targets.iter() {
+            run(Some(target))?;
         }
     }
 

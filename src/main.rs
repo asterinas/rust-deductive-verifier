@@ -37,12 +37,8 @@ enum Commands {
     )]
     Bootstrap(BootstrapArgs),
 
-    #[command(
-        name = "compile",
-        about = "Compile the verification targets",
-        alias = "c"
-    )]
-    Compile(CompileArgs),
+    #[command(name = "build", about = "Build the verification targets", alias = "c")]
+    Build(BuildArgs),
 
     #[command(
         name = "clean",
@@ -149,7 +145,7 @@ struct VerifyArgs {
         short = 'i',
         long = "import", 
         value_parser = verus::find_target,
-        help = "Import verified local crates (they need to be compiled first)",
+        help = "Import verified local crates (they need to be built first)",
         num_args = 0..,
         action = ArgAction::Append)]
     imports: Vec<VerusTarget>,
@@ -240,12 +236,12 @@ struct DocArgs {
 }
 
 #[derive(Parser, Debug)]
-struct CompileArgs {
+struct BuildArgs {
     #[arg(
         short = 't',
         long = "targets",
         value_parser = verus::find_target,
-        help = "The targets to compile",
+        help = "The targets to build",
         num_args = 0..,
         action = ArgAction::Append)]
     targets: Vec<VerusTarget>,
@@ -254,7 +250,7 @@ struct CompileArgs {
         short = 'i',
         long = "import", 
         value_parser = verus::find_target,
-        help = "Import verified local crates (they need to be compiled first)",
+        help = "Import verified local crates (they need to be built first)",
         num_args = 0..,
         action = ArgAction::Append)]
     imports: Vec<VerusTarget>,
@@ -296,7 +292,7 @@ struct CompileArgs {
         short = 'a',
         long = "disasm",
         default_value = "false",
-        help = "Do not disassemble the compiled binary",
+        help = "Do not disassemble the built binary",
         action = ArgAction::SetTrue)]
     disasm: bool,
 
@@ -475,7 +471,7 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
     }
 }
 
-fn compile(args: &CompileArgs) -> Result<(), DynError> {
+fn build(args: &BuildArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
@@ -489,7 +485,7 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         verify_only_module_main_only: false,
     };
 
-    verus::exec_compile(&targets, &options)
+    verus::exec_build(&targets, &options)
 }
 
 fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
@@ -570,7 +566,7 @@ fn main() {
         Commands::Verify(args) => verify(args),
         Commands::Doc(args) => doc(args),
         Commands::Bootstrap(args) => bootstrap(args),
-        Commands::Compile(args) => compile(args),
+        Commands::Build(args) => build(args),
         Commands::Fingerprint(args) => fingerprint(args),
         Commands::ListTargets(args) => list_targets(args),
         Commands::NewTarget(args) => new_target(args),
