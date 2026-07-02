@@ -14,10 +14,7 @@ use cargo_metadata;
 use cargo_metadata::CrateType;
 
 use crate::commands::CargoBuildExterns;
-use crate::generator::Generative;
-use crate::{
-    commands, dep_tree, executable, files, fingerprint, generator, projects, serialization,
-};
+use crate::{commands, dep_tree, executable, files, fingerprint, projects, serialization};
 
 pub type DynError = Box<dyn std::error::Error>;
 
@@ -677,34 +674,6 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
     result
 }
 
-pub fn get_dependent_targets(target: &VerusTarget, release: bool) -> IndexMap<String, VerusTarget> {
-    let mut deps = get_local_dependency(target);
-    let order = resolve_deps_cached(target, release).full_externs;
-    deps.sort_by(|a, _, b, _| {
-        let x = order.get_index_of(a).unwrap_or(usize::MAX);
-        let y = order.get_index_of(b).unwrap_or(usize::MAX);
-        x.cmp(&y)
-    });
-    deps
-}
-
-pub fn get_dependent_targets_batch(
-    targets: &[VerusTarget],
-    release: bool,
-) -> IndexMap<String, VerusTarget> {
-    let mut deps = IndexMap::new();
-    for target in targets.iter() {
-        deps.extend(get_local_dependency(target));
-    }
-    let order = resolve_deps_cached(targets.first().unwrap(), release).full_externs;
-    deps.sort_by(|a, _, b, _| {
-        let x = order.get_index_of(a).unwrap_or(usize::MAX);
-        let y = order.get_index_of(b).unwrap_or(usize::MAX);
-        x.cmp(&y)
-    });
-    deps
-}
-
 pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<String, String> {
     let externs = resolve_deps_cached(target, release).renamed_full_externs();
 
@@ -729,37 +698,6 @@ pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<St
     }
 
     deps
-}
-
-pub fn cmd_push_import(cmd: &mut Command, imports: &[&VerusTarget]) {
-    for imp in imports.iter() {
-        cmd.arg("--import")
-            .arg(format!("{}={}", imp.name, imp.library_proof().display()));
-        cmd.arg("--extern")
-            .arg(format!("{}={}", imp.name, imp.library_path().display()));
-    }
-}
-
-pub fn check_imports_compiled(imports: &[&VerusTarget]) -> Result<(), DynError> {
-    for imp in imports.iter() {
-        if !imp.library_proof().exists() {
-            return Err(format!(
-                "Cannot find the proof file at `{}` for `{}`",
-                imp.library_proof().display(),
-                imp.name
-            )
-            .into());
-        }
-        if !imp.library_path().exists() {
-            return Err(format!(
-                "Cannot find the library file at `{}` for `{}`",
-                imp.library_path().display(),
-                imp.name
-            )
-            .into());
-        }
-    }
-    Ok(())
 }
 
 pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError> {
@@ -826,45 +764,6 @@ pub fn resolve_deps_cached(target: &VerusTarget, release: bool) -> serialization
     }
 }
 
-pub fn gen_extern_crates(target: &VerusTarget, release: bool) {
-    let externs = resolve_deps_cached(target, release);
-    let mut tmpl = generator::ExternCratesTemplate { crates: Vec::new() };
-
-    let local_deps = target
-        .dependencies
-        .iter()
-        .filter(|dep| dep.path.is_some())
-        .map(|dep| dep.name.replace('-', "_"))
-        .collect::<HashSet<_>>();
-
-    for name in externs.full_externs.keys() {
-        if system_crates().contains(name.as_str()) {
-            // Skip system crates
-            continue;
-        }
-
-        if local_deps.contains(name) {
-            // Skip local dependencies
-            continue;
-        }
-
-        tmpl.crates.push(generator::CrateInfo {
-            name: name.clone(),
-            alias: None,
-        });
-    }
-
-    let deps_path = get_target_dir().join(format!("{}.deps.toml", target.name));
-    let deps_time = files::modify_time(deps_path);
-    let crates_path = get_target_dir().join(format!("{}.extern_crates.rs", target.name));
-
-    tmpl.save_if(&crates_path, &deps_time);
-}
-
-pub fn prepare(target: &VerusTarget, release: bool) {
-    gen_extern_crates(target, release);
-}
-
 /// Move files from workspace `.verus-log` root into a per-crate subdirectory.
 fn move_verus_log_files(crate_name: &str) {
     let workspace_root = get_workspace_root();
@@ -914,232 +813,6 @@ fn move_verus_log_files(crate_name: &str) {
                 }
             }
         }
-    }
-}
-
-fn get_build_dir(release: bool) -> &'static str {
-    if release {
-        "release"
-    } else {
-        "debug"
-    }
-}
-
-/// Compile a single target using the Verus verifier.
-///
-/// This function directly invokes the Verus compiler on a single target.
-/// It handles dependency setup, external crate linking, and compilation options.
-/// It does NOT recursively compile dependencies, an error will occur if dependencies
-/// are missing. To compile a target along with its dependencies,
-///  - use `compile_target_with_dependencies` for that.
-///
-/// # Arguments
-///
-/// * `target` - The target to compile
-/// * `imports` - Additional targets to import (not auto-discovered)
-/// * `options` - Compilation options (log, trace, release, max_errors, disasm, pass_through)
-pub fn compile_single_target(
-    target: &VerusTarget,
-    imports: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
-    let ts_start = Instant::now();
-
-    let verus = get_verus(options.release);
-    let z3 = get_z3();
-    let extra_imports = imports
-        .iter()
-        .map(|target| (target.name.clone(), target.clone()))
-        .collect::<IndexMap<_, _>>();
-
-    let out_dir = get_target_dir();
-    if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            error!("Error creating target directory: {}", e);
-        });
-    }
-    let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
-
-    prepare(target, options.release);
-
-    let mut deps = get_local_dependency(target);
-    let dep_rebuilt = deps.values().into_iter().any(|t| t.rebuilt == true);
-
-    if !dep_rebuilt && target.is_fresh(&verus_targets()) {
-        info!(
-            "[Fresh] `{}` is up to date, skipping verification",
-            target.name
-        );
-        return Ok(());
-    }
-
-    let cmd = &mut Command::new(&verus);
-
-    // setup the environment
-    cmd.env("VERUS_PATH", &verus).env("VERUS_Z3_PATH", &z3);
-    cmd.args([
-        "-L",
-        &format!("dependency={}", deps_dir.display()),
-        "-L",
-        &get_verus_target_dir().display().to_string(),
-    ]);
-
-    if !target.gen_lifetime {
-        cmd.arg("--no-lifetime");
-    }
-
-    // output options
-    cmd.arg("--compile")
-        .arg("--export")
-        .arg(target.library_proof());
-
-    // imported dependencies
-    deps.extend(extra_imports.clone());
-    let all_imports = deps.values().collect::<Vec<_>>();
-    check_imports_compiled(all_imports.as_slice())?;
-    cmd_push_import(cmd, all_imports.as_slice());
-
-    // import external crates
-    let externs = get_remote_dependency(target, options.release);
-    check_externs(&externs).unwrap_or_else(|e| {
-        error!("Error during verification: {}", e);
-    });
-    cmd_push_externs(cmd, &externs);
-
-    // extra options
-    if options.log {
-        cmd.arg("--log-all");
-    }
-
-    if options.trace {
-        cmd.env("RUST_BACKTRACE", "full");
-        cmd.arg("--trace");
-    }
-
-    if options.release {
-        cmd.args(["-C", "opt-level=2"]);
-    } else {
-        cmd.args(["-C", "opt-level=0"]);
-    }
-
-    // input file
-    let target_file = target.root_file();
-    let crate_type = target.crate_type();
-    cmd.arg(target_file)
-        .arg(format!("--crate-type={}", crate_type))
-        .arg("--expand-errors")
-        .arg(format!("--multiple-errors={}", options.max_errors))
-        .arg("-o")
-        .arg(target.library_path())
-        .arg("-V")
-        .arg("use-crate-name")
-        .args(&options.pass_through)
-        .arg("--")
-        .arg("-C")
-        .arg(format!("metadata={}", target.name));
-
-    for feature in target.features.iter() {
-        cmd.args(["--cfg", &format!("feature=\"{}\"", feature)]);
-    }
-    cmd.stdout(Stdio::inherit());
-
-    info!(
-        "  {} {} {}",
-        "Verifying (and compiling)".bold().green(),
-        target.name.white(),
-        target.version.white()
-    );
-    debug!(">> {:?}", cmd);
-
-    // run the command
-    let status = cmd.status().unwrap_or_else(|e| {
-        error!("Error during compilation: {}", e);
-    });
-
-    if status.success() {
-        // duration
-        let duration = ts_start.elapsed();
-        info!(
-            "  {} {} {} in {:.2}s",
-            "Verified".bold().green(),
-            target.name.white(),
-            target.version.white(),
-            duration.as_secs_f64()
-        );
-
-        // success
-        target.save_library_proof_timestamp(&verus_targets());
-
-        // disassemble the output
-        if options.disasm {
-            disassemble(target).unwrap_or_else(|e| {
-                error!("Error during disassembly: {}", e);
-            });
-        }
-
-        if options.log {
-            move_verus_log_files(&target.name);
-        }
-
-        return Ok(());
-    }
-
-    // failure
-    Err(format!("Error during compilation: `{}`", target.name,).into())
-}
-
-/// Recursively compile a target and all its dependencies in the correct order.
-///
-/// This function handles the recursive compilation of a target and its dependencies,
-/// ensuring proper topological ordering. It ensures that all dependencies of a target
-/// are compiled before the target itself. It also maintains a set of already-compiled
-/// targets to avoid redundant compilation.
-///
-/// # Arguments
-///
-/// * `target` - The target to compile along with its dependencies
-/// * `compiled` - Set tracking already-compiled target names (modified in-place)
-/// * `scope_targets` - Map of targets allowed to be compiled (acts as a scope limiter).
-///   Only targets in this map will actually be compiled, even if they're in dependencies.
-/// * `options` - Extra compilation options
-///
-/// # Behavior
-///
-/// 1. Returns early if the target is already in the `compiled` set
-/// 2. Recursively compiles all dependencies that are in `extended_targets`
-/// 3. Compiles the target itself if it's in `extended_targets`
-/// 4. Marks the target as compiled to prevent duplicate work
-pub fn compile_target_with_dependencies(
-    target: &VerusTarget,
-    compiled: &mut std::collections::HashSet<String>,
-    scope_targets: &IndexMap<String, VerusTarget>,
-    options: &ExtraOptions,
-) {
-    let all_targets = verus_targets();
-
-    if compiled.contains(&target.name) {
-        return;
-    }
-
-    // First compile all dependencies that exist in scope
-    for dep in &target.dependencies {
-        if scope_targets.contains_key(&dep.name) {
-            if let Some(dep_target) = all_targets.get(&dep.name) {
-                compile_target_with_dependencies(dep_target, compiled, scope_targets, options);
-            }
-        }
-    }
-
-    // Then compile this target if it's in scope
-    if scope_targets.contains_key(&target.name) {
-        let target_options = options.for_dependency();
-        compile_single_target(target, &vec![], &target_options).unwrap_or_else(|e| {
-            error!(
-                "Unable to build the dependent proof: `{}` ({})",
-                target.name, e
-            );
-        });
-        compiled.insert(target.name.clone());
     }
 }
 
@@ -1259,7 +932,7 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
 
 pub fn exec_compile(
     targets: &[VerusTarget],
-    imports: &[VerusTarget],
+    _imports: &[VerusTarget],
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
     let out_dir = get_target_dir();
@@ -1269,28 +942,49 @@ pub fn exec_compile(
         });
     }
 
-    let extended_targets = get_dependent_targets_batch(targets, options.release);
-    let mut compiled = std::collections::HashSet::new();
-    let all_targets = verus_targets();
-
-    // Process each dependency in extended_targets
-    for target_name in extended_targets.keys() {
-        if let Some(target) = all_targets.get(target_name) {
-            compile_target_with_dependencies(target, &mut compiled, &extended_targets, options);
+    for target in targets.iter() {
+        let cmd = &mut Command::new(get_cargo_verus(options.release));
+        cmd.arg("build").arg("-p").arg(&target.name);
+        if options.release {
+            cmd.arg("--release");
         }
-    }
 
-    // remove the targets that has been compiled
-    let remaining_targets = targets
-        .iter()
-        .filter(|target| {
-            let name = target.name.replace('-', "_");
-            !extended_targets.contains_key(&name)
-        })
-        .collect::<Vec<_>>();
+        let mut verus_args = Vec::new();
+        if options.log {
+            verus_args.push("--log-all".to_string());
+        }
+        if options.trace {
+            cmd.env("RUST_BACKTRACE", "full");
+            verus_args.push("--trace".to_string());
+        }
+        verus_args.push(format!("--multiple-errors={}", options.max_errors));
+        verus_args.extend(options.pass_through.clone());
+        if !verus_args.is_empty() {
+            cmd.arg("--").args(verus_args);
+        }
 
-    for target in remaining_targets.iter() {
-        compile_single_target(target, imports, options)?;
+        info!(
+            "  {} {} {}",
+            "Compiling".bold().green(),
+            target.name.white(),
+            target.version.white()
+        );
+        debug!(">> {:?}", cmd);
+
+        let status = cmd.status().unwrap_or_else(|e| {
+            error!("Error during compilation: {}", e);
+        });
+
+        if status.success() {
+            info!(
+                "  {} {} {}",
+                "Compiled".bold().green(),
+                target.name.white(),
+                target.version.white()
+            );
+        } else {
+            error!("Compilation failed for target {}", target.name);
+        }
     }
 
     Ok(())
