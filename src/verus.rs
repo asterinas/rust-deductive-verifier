@@ -37,6 +37,7 @@ pub const CARGO_VERUS_BIN: &str = "cargo-verus";
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
 pub const VERUS_EVN: &str = "VERUS_PATH";
+pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
 
 #[cfg(target_os = "windows")]
 pub const VERUSFMT_BIN: &str = "verusfmt.exe";
@@ -87,7 +88,7 @@ pub fn get_verus(release: bool) -> PathBuf {
 pub fn get_cargo_verus(release: bool) -> PathBuf {
     executable::locate(
         CARGO_VERUS_BIN,
-        None,
+        Some(CARGO_VERUS_ENV),
         if release {
             &[VERUS_HINT_RELEASE, VERUS_HINT]
         } else {
@@ -96,7 +97,7 @@ pub fn get_cargo_verus(release: bool) -> PathBuf {
     )
     .unwrap_or_else(|| {
         error!(
-            "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade` or add cargo-verus to your PATH"
+            "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade`, set CARGO_VERUS_PATH, or add cargo-verus to your PATH"
         );
     })
 }
@@ -816,21 +817,19 @@ fn move_verus_log_files(crate_name: &str) {
 }
 
 pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
-    for target in targets.iter() {
-        if options.count_line {
-            eprintln!(
-                "Error: --count-line is currently unsupported with cargo-verus for target {}",
-                target.name
-            );
-            // TODO: Re-enable this path once cargo-verus can produce the dep-info expected by Verus' line_count tool.
-            return Err("--count-line is currently unsupported with cargo-verus".into());
-        }
+    if options.count_line {
+        eprintln!("Error: --count-line is currently unsupported with cargo-verus");
+        // TODO: Re-enable this path once cargo-verus can produce the dep-info expected by Verus' line_count tool.
+        return Err("--count-line is currently unsupported with cargo-verus".into());
+    }
 
+    let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let ts_start = Instant::now();
         let cmd = &mut Command::new(get_cargo_verus(options.release));
-        cmd.arg(if options.focus { "focus" } else { "verify" })
-            .arg("-p")
-            .arg(&target.name);
+        cmd.arg(if options.focus { "focus" } else { "verify" });
+        if let Some(target) = target {
+            cmd.arg("-p").arg(&target.name);
+        }
 
         let mut verus_args = Vec::new();
         if options.log {
@@ -852,8 +851,11 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         info!(
             "  {} {} {}",
             "Verifying".bold().green(),
-            target.name.white(),
-            target.version.white()
+            target
+                .map(|t| t.name.as_str())
+                .unwrap_or("workspace")
+                .white(),
+            target.map(|t| t.version.as_str()).unwrap_or("").white()
         );
         debug!(">> {:?}", cmd);
 
@@ -867,16 +869,23 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
             info!(
                 "  {} {} {} in {:.2}s",
                 "Verified".bold().green(),
-                target.name.white(),
-                target.version.white(),
+                target
+                    .map(|t| t.name.as_str())
+                    .unwrap_or("workspace")
+                    .white(),
+                target.map(|t| t.version.as_str()).unwrap_or("").white(),
                 duration.as_secs_f64()
             );
 
-            if options.log {
+            if options.log && target.is_some() {
+                let target = target.unwrap();
                 move_verus_log_files(&target.name);
             }
         } else {
-            error!("Verification failed for target {}", target.name);
+            error!(
+                "Verification failed for {}",
+                target.map(|t| t.name.as_str()).unwrap_or("workspace")
+            );
         }
 
         if options.count_line {
@@ -892,11 +901,23 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
                 .arg(&dependency_file)
                 .arg("-p");
 
-            println!("Counting lines for target: {}", target.name);
+            println!(
+                "Counting lines for {}",
+                target.map(|t| t.name.as_str()).unwrap_or("workspace")
+            );
             let line_count_result = cargo_cmd.status();
             std::env::set_current_dir(current_dir)?;
             line_count_result?;
             fs::remove_file(&dependency_file)?;
+        }
+        Ok(())
+    };
+
+    if targets.is_empty() {
+        run(None)?;
+    } else {
+        for target in targets.iter() {
+            run(Some(target))?;
         }
     }
     Ok(())
