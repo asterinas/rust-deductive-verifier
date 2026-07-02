@@ -183,7 +183,7 @@ struct VerifyArgs {
     #[arg(
         short = 'f',
         long = "focus",
-        help = "Run verification even if it is verified before",
+        help = "Verify root crates without re-checking dependency proofs",
         default_value = "false",
         action = ArgAction::SetTrue
     )]
