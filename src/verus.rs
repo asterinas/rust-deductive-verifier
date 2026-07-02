@@ -815,11 +815,7 @@ fn move_verus_log_files(crate_name: &str) {
     }
 }
 
-pub fn exec_verify(
-    targets: &[VerusTarget],
-    _imports: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
+pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
     for target in targets.iter() {
         if options.count_line {
             eprintln!(
@@ -938,11 +934,7 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     Ok(())
 }
 
-pub fn exec_compile(
-    targets: &[VerusTarget],
-    _imports: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
+pub fn exec_compile(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
     for target in targets.iter() {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
         cmd.arg("build").arg("-p").arg(&target.name);

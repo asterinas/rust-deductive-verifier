@@ -183,7 +183,7 @@ struct VerifyArgs {
     #[arg(
         short = 'f',
         long = "focus",
-        help = "Verify only the selected package contents using cargo-verus focus",
+        help = "Run verification even if it is verified before",
         default_value = "false",
         action = ArgAction::SetTrue
     )]
@@ -443,7 +443,6 @@ struct FmtArgs {
 
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    let imports = args.imports.clone();
     // verify-only-module should only apply to the main target
     // Conditions: exactly one target AND pass_through contains "--verify-only-module"
     let verify_only_module_main_only = targets.len() == 1
@@ -463,7 +462,7 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         verify_only_module_main_only,
     };
 
-    verus::exec_verify(&targets, &imports, &options)
+    verus::exec_verify(&targets, &options)
 }
 
 fn doc(args: &DocArgs) -> Result<(), DynError> {
@@ -493,7 +492,6 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
 
 fn compile(args: &CompileArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    let imports = args.imports.clone();
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
         log: args.log,
@@ -506,7 +504,7 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         verify_only_module_main_only: false,
     };
 
-    verus::exec_compile(&targets, &imports, &options)
+    verus::exec_compile(&targets, &options)
 }
 
 fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
