@@ -33,6 +33,11 @@ pub const VERUS_BIN: &str = "verus.exe";
 #[cfg(not(target_os = "windows"))]
 pub const VERUS_BIN: &str = "verus";
 
+#[cfg(target_os = "windows")]
+pub const CARGO_VERUS_BIN: &str = "cargo-verus.exe";
+#[cfg(not(target_os = "windows"))]
+pub const CARGO_VERUS_BIN: &str = "cargo-verus";
+
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
 pub const VERUS_EVN: &str = "VERUS_PATH";
@@ -80,6 +85,24 @@ pub fn get_verus(release: bool) -> PathBuf {
         ).unwrap_or_else(|| {
             error!("Cannot find the Verus binary, please set the VERUS_PATH environment variable or add it to your PATH");
         })
+}
+
+#[memoize]
+pub fn get_cargo_verus(release: bool) -> PathBuf {
+    executable::locate(
+        CARGO_VERUS_BIN,
+        None,
+        if release {
+            &[VERUS_HINT_RELEASE, VERUS_HINT]
+        } else {
+            &[VERUS_HINT, VERUS_HINT_RELEASE]
+        },
+    )
+    .unwrap_or_else(|| {
+        error!(
+            "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade` or add cargo-verus to your PATH"
+        );
+    })
 }
 
 #[memoize]
@@ -235,6 +258,8 @@ pub struct ExtraOptions {
     pub pass_through: Vec<String>,
     /// count lines of code
     pub count_line: bool,
+    /// use cargo-verus focus instead of cargo-verus verify
+    pub focus: bool,
     /// verify-only-module should only apply to the main target, not its dependencies
     pub verify_only_module_main_only: bool,
 }
@@ -276,6 +301,7 @@ impl ExtraOptions {
             disasm: self.disasm,
             pass_through,
             count_line: self.count_line,
+            focus: self.focus,
             verify_only_module_main_only: self.verify_only_module_main_only,
         }
     }
@@ -1119,140 +1145,32 @@ pub fn compile_target_with_dependencies(
 
 pub fn exec_verify(
     targets: &[VerusTarget],
-    imports: &[VerusTarget],
+    _imports: &[VerusTarget],
     options: &ExtraOptions,
 ) -> Result<(), DynError> {
-    let verus = get_verus(options.release);
-    let z3 = get_z3();
-    let extra_imports = imports
-        .iter()
-        .map(|target| (target.name.clone(), target.clone()))
-        .collect::<IndexMap<_, _>>();
-    let out_dir = get_target_dir();
-    if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            error!("Error creating target directory: {}", e);
-        });
-    }
-    let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
+    for target in targets.iter() {
+        let ts_start = Instant::now();
+        let cmd = &mut Command::new(get_cargo_verus(options.release));
+        cmd.arg(if options.focus { "focus" } else { "verify" })
+            .arg("-p")
+            .arg(&target.name);
 
-    let extended_targets = get_dependent_targets_batch(targets, options.release);
-
-    let mut compiled = std::collections::HashSet::new();
-    let all_targets = verus_targets();
-
-    // Process each dependency in extended_targets
-    for target_name in extended_targets.keys() {
-        if let Some(target) = all_targets.get(target_name) {
-            compile_target_with_dependencies(target, &mut compiled, &extended_targets, options);
-        }
-    }
-
-    let ts_start = Instant::now();
-    // remove the targets that has been compiled
-    let remaining_targets = targets
-        .iter()
-        .filter(|target| {
-            let name = target.name.replace('-', "_");
-            !extended_targets.contains_key(&name)
-        })
-        .collect::<Vec<_>>();
-
-    for target in remaining_targets.iter() {
-        prepare(target, options.release);
-
-        let cmd = &mut Command::new(&verus);
-
-        // setup the environment
-        cmd.env("VERUS_PATH", &verus).env("VERUS_Z3_PATH", &z3);
-
-        cmd.args([
-            "-L",
-            &format!("dependency={}", deps_dir.display()),
-            "-L",
-            &get_verus_target_dir().display().to_string(),
-        ]);
-
-        if !target.gen_lifetime {
-            cmd.arg("--no-lifetime");
-        }
-
-        // imported dependencies
-        let deps = &mut get_local_dependency(target);
-        deps.extend(extra_imports.clone());
-        let all_imports = deps.values().collect::<Vec<_>>();
-
-        // Check and compile missing imports
-        let mut missing_targets = Vec::new();
-        for imp in all_imports.iter() {
-            if !imp.library_proof().exists() || !imp.library_path().exists() {
-                missing_targets.push((*imp).clone());
-            }
-        }
-
-        if !missing_targets.is_empty() {
-            info!(
-                "Missing verification files for dependencies: {:?}",
-                missing_targets.iter().map(|t| &t.name).collect::<Vec<_>>()
-            );
-            info!("Automatically compiling missing dependencies...");
-
-            let mut compiled = std::collections::HashSet::new();
-            let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
-                .iter()
-                .map(|t| (t.name.clone(), t.clone()))
-                .collect();
-
-            for target_item in &missing_targets {
-                compile_target_with_dependencies(
-                    target_item,
-                    &mut compiled,
-                    &missing_targets_map,
-                    options,
-                );
-            }
-        }
-
-        check_imports_compiled(all_imports.as_slice()).unwrap_or_else(|e| {
-            error!("Error during verification: {}", e);
-        });
-        cmd_push_import(cmd, all_imports.as_slice());
-
-        // import external crates
-        let externs = get_remote_dependency(target, options.release);
-        check_externs(&externs).unwrap_or_else(|e| {
-            error!("Error during verification: {}", e);
-        });
-        cmd_push_externs(cmd, &externs);
-
-        // extra options
+        let mut verus_args = Vec::new();
         if options.log {
-            cmd.arg("--log-all");
+            verus_args.push("--log-all".to_string());
         }
         if options.trace {
             cmd.env("RUST_BACKTRACE", "full");
-            cmd.arg("--trace");
+            verus_args.push("--trace".to_string());
         }
         if options.count_line {
-            cmd.arg("--emit=dep-info");
+            verus_args.push("--emit=dep-info".to_string());
         }
-
-        // input file
-        let target_file = target.root_file();
-        let crate_type = target.crate_type();
-        cmd.arg(target_file)
-            .arg(format!("--crate-type={}", crate_type))
-            .arg("--expand-errors")
-            .arg(format!("--multiple-errors={}", options.max_errors))
-            .args(&options.pass_through)
-            .arg("--")
-            .arg("-C")
-            .arg(format!("metadata={}", target.name));
-
-        for feature in target.features.iter() {
-            cmd.args(["--cfg", &format!("feature=\"{}\"", feature)]);
+        verus_args.push(format!("--multiple-errors={}", options.max_errors));
+        verus_args.extend(options.pass_through.clone());
+        if !verus_args.is_empty() {
+            cmd.arg("--").args(verus_args);
         }
-        cmd.stdout(Stdio::inherit());
 
         info!(
             "  {} {} {}",
@@ -1262,7 +1180,6 @@ pub fn exec_verify(
         );
         debug!(">> {:?}", cmd);
 
-        // run the command
         let status = cmd.status().unwrap_or_else(|e| {
             error!("Error during verification: {}", e);
         });
@@ -1288,7 +1205,8 @@ pub fn exec_verify(
         if options.count_line {
             let verus_root = install::verus_dir();
             let line_count_dir = verus_root.join("source/tools/line_count");
-            let dependency_file = env::current_dir()?.join("lib.d");
+            let current_dir = env::current_dir()?;
+            let dependency_file = current_dir.join("lib.d");
             env::set_current_dir(&line_count_dir)?;
             let mut cargo_cmd = Command::new("cargo");
             cargo_cmd
@@ -1298,7 +1216,9 @@ pub fn exec_verify(
                 .arg("-p");
 
             println!("Counting lines for target: {}", target.name);
-            cargo_cmd.status()?;
+            let line_count_result = cargo_cmd.status();
+            env::set_current_dir(current_dir)?;
+            line_count_result?;
             fs::remove_file(&dependency_file)?;
         }
     }

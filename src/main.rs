@@ -181,6 +181,15 @@ struct VerifyArgs {
     debug: bool,
 
     #[arg(
+        short = 'f',
+        long = "focus",
+        help = "Verify only the selected package contents using cargo-verus focus",
+        default_value = "false",
+        action = ArgAction::SetTrue
+    )]
+    focus: bool,
+
+    #[arg(
         last = true,
         help = "Pass-through arguments to the Verus verifier",
         allow_hyphen_values = true
@@ -450,6 +459,7 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         disasm: false,
         pass_through: args.pass_through.clone(),
         count_line: args.count_line,
+        focus: args.focus,
         verify_only_module_main_only,
     };
 
@@ -492,6 +502,7 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         disasm: args.disasm,
         pass_through: args.pass_through.clone(),
         count_line: false,
+        focus: false,
         verify_only_module_main_only: false,
     };
 
