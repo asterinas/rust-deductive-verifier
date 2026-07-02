@@ -1,7 +1,9 @@
 use crate::verus::{self, DynError, VerusTarget};
+use cargo_metadata::MetadataCommand;
 use colored::Colorize;
 use indexmap::IndexMap;
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Generate documentation for verification targets
@@ -112,8 +114,10 @@ fn generate_single_target_doc(
         state_machine_macros_path.display()
     ));
 
-    // Add extern dependencies for vstd
-    let vstd_path = verus_target_dir.join("libvstd.rlib");
+    // Prefer the Cargo-built vstd when available so rustdoc uses the same crate
+    // instance as compiled local dependencies.
+    let vstd_path = find_dependency_artifact(&target_dir, "vstd")
+        .unwrap_or_else(|| verus_target_dir.join("libvstd.rlib"));
     cmd.arg("--extern")
         .arg(format!("vstd={}", vstd_path.display()));
 
@@ -121,17 +125,14 @@ fn generate_single_target_doc(
     let deps = verus::get_local_dependency(target);
     for (_name, dep_target) in deps.iter() {
         if dep_target.name != target.name {
-            // Check if .rlib file exists for this dependency
-            let rlib_path =
-                target_dir.join(format!("lib{}.rlib", dep_target.name.replace('-', "_")));
-            if rlib_path.exists() {
+            if let Some(rlib_path) = find_local_dependency_rlib(&target_dir, &dep_target.name) {
                 let extern_name = dep_target.name.replace('-', "_");
                 cmd.arg("--extern")
                     .arg(format!("{}={}", extern_name, rlib_path.display()));
             } else {
                 return Err(format!(
-                    "Missing compiled dependency '{}' for target '{}'.\n\nPlease run:\n  cargo dv verify --targets {}",
-                    dep_target.name, target.name, target.name
+                    "Missing compiled dependency '{}' for target '{}'.\n\nPlease run:\n  cargo dv verify",
+                    dep_target.name, target.name
                 ).into());
             }
         }
@@ -151,10 +152,26 @@ fn generate_single_target_doc(
         .collect::<IndexMap<_, _>>();
     verus::check_externs(&remote_deps)?;
     verus::cmd_push_externs(&mut cmd, &remote_deps);
+    let mut pushed_externs = remote_deps.keys().cloned().collect::<HashSet<_>>();
 
-    let deps_dir = target_dir.join("release").join("deps");
-    cmd.arg("-L")
-        .arg(format!("dependency={}", deps_dir.display()));
+    for (extern_name, artifact_name) in direct_cargo_dependencies(&target.name)? {
+        if pushed_externs.contains(&extern_name) {
+            continue;
+        }
+        if let Some(path) = find_dependency_artifact(&target_dir, &artifact_name) {
+            cmd.arg("--extern")
+                .arg(format!("{}={}", extern_name, path.display()));
+            pushed_externs.insert(extern_name);
+        }
+    }
+
+    for deps_dir in [
+        target_dir.join("release").join("deps"),
+        target_dir.join("debug").join("deps"),
+    ] {
+        cmd.arg("-L")
+            .arg(format!("dependency={}", deps_dir.display()));
+    }
     cmd.arg("-L").arg(format!("{}", verus_target_dir.display()));
     cmd.arg("-L").arg(format!("{}", target_dir.display()));
     cmd.arg("--edition=2021")
@@ -207,6 +224,108 @@ fn generate_single_target_doc(
     );
 
     Ok(())
+}
+
+fn direct_cargo_dependencies(package_name: &str) -> Result<Vec<(String, String)>, DynError> {
+    let metadata = MetadataCommand::new().exec()?;
+    let workspace_packages = metadata
+        .workspace_members
+        .iter()
+        .filter_map(|id| metadata.packages.iter().find(|package| package.id == *id))
+        .map(|package| package.name.replace('-', "_"))
+        .collect::<HashSet<_>>();
+
+    let Some(package) = metadata
+        .packages
+        .iter()
+        .find(|package| package.name == package_name)
+    else {
+        return Ok(Vec::new());
+    };
+
+    Ok(package
+        .dependencies
+        .iter()
+        .filter(|dep| matches!(dep.kind, cargo_metadata::DependencyKind::Normal))
+        .filter_map(|dep| {
+            let extern_name = dep.rename.as_ref().unwrap_or(&dep.name).replace('-', "_");
+            let artifact_name = dep.name.replace('-', "_");
+            if workspace_packages.contains(&artifact_name)
+                || verus::system_crates().contains(extern_name.as_str())
+            {
+                None
+            } else {
+                Some((extern_name, artifact_name))
+            }
+        })
+        .collect())
+}
+
+fn find_local_dependency_rlib(target_dir: &Path, dep_name: &str) -> Option<PathBuf> {
+    let extern_name = dep_name.replace('-', "_");
+    let unversioned = format!("lib{extern_name}.rlib");
+    let hashed_prefix = format!("lib{extern_name}-");
+
+    let exact_candidates = [
+        target_dir.join(&unversioned),
+        target_dir.join("release").join(&unversioned),
+        target_dir.join("debug").join(&unversioned),
+    ];
+    for candidate in exact_candidates {
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    let deps_dirs = [
+        target_dir.join("release").join("deps"),
+        target_dir.join("debug").join("deps"),
+    ];
+    for deps_dir in deps_dirs {
+        if let Some(path) = newest_matching_artifact(&deps_dir, &hashed_prefix, ".rlib") {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+fn find_dependency_artifact(target_dir: &Path, crate_name: &str) -> Option<PathBuf> {
+    find_hashed_artifact(target_dir, crate_name, "rlib")
+        .or_else(|| find_hashed_artifact(target_dir, crate_name, "rmeta"))
+}
+
+fn find_hashed_artifact(target_dir: &Path, crate_name: &str, extension: &str) -> Option<PathBuf> {
+    let prefix = format!("lib{}-", crate_name.replace('-', "_"));
+    let suffix = format!(".{extension}");
+    for deps_dir in [
+        target_dir.join("release").join("deps"),
+        target_dir.join("debug").join("deps"),
+    ] {
+        if let Some(path) = newest_matching_artifact(&deps_dir, &prefix, &suffix) {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+fn newest_matching_artifact(dir: &Path, prefix: &str, suffix: &str) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with(prefix) && name.ends_with(suffix))
+                .unwrap_or(false)
+        })
+        .max_by_key(|path| {
+            path.metadata()
+                .and_then(|metadata| metadata.modified())
+                .ok()
+        })
 }
 
 fn run_verusdoc_postprocessor() -> Result<(), DynError> {
