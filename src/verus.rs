@@ -24,18 +24,12 @@ pub type DynError = Box<dyn std::error::Error>;
 /// It also provides a method to get the root directory of the project.
 ///
 
-#[cfg(target_os = "windows")]
-pub const CARGO_VERUS_BIN: &str = "cargo-verus.exe";
-#[cfg(not(target_os = "windows"))]
 pub const CARGO_VERUS_BIN: &str = "cargo-verus";
+pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
 
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
-pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
 
-#[cfg(target_os = "windows")]
-pub const VERUSFMT_BIN: &str = "verusfmt.exe";
-#[cfg(not(target_os = "windows"))]
 pub const VERUSFMT_BIN: &str = "verusfmt";
 
 #[cfg(target_os = "windows")]
@@ -45,9 +39,8 @@ pub const DYN_LIB: &str = ".so";
 #[cfg(target_os = "macos")]
 pub const DYN_LIB: &str = ".dylib";
 
-#[cfg(target_os = "windows")]
-pub const VERUSDOC_BIN: &str = "verusdoc.exe";
-#[cfg(not(target_os = "windows"))]
+pub const RUSTDOC_BIN: &str = "rustdoc";
+
 pub const VERUSDOC_BIN: &str = "verusdoc";
 pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target/release";
 pub const VERUSDOC_HINT: &str = "tools/verus/source/target/debug";
@@ -68,6 +61,17 @@ pub fn get_cargo_verus(release: bool) -> PathBuf {
             "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade`, set CARGO_VERUS_PATH, or add cargo-verus to your PATH"
         );
     })
+}
+
+#[memoize]
+pub fn get_rustdoc() -> PathBuf {
+    executable::locate(
+            RUSTDOC_BIN,
+            None,
+            &[] as &[&str]
+        ).unwrap_or_else(|| {
+            error!("Cannot find the rustdoc binary, please install it using `rustup component add rust-docs`");
+        })
 }
 
 #[memoize]

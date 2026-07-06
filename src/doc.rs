@@ -82,7 +82,9 @@ fn generate_single_target_doc(
 
     let verus_target_dir = verus::get_verus_target_dir();
     let target_dir = verus::get_target_dir();
-    let mut cmd = Command::new("rustdoc");
+    let rustdoc = verus::get_rustdoc();
+
+    let mut cmd = Command::new(&rustdoc);
 
     // Set VERUSDOC environment variable based on verus_conds flags
     let verus_doc_value = if verus_conds || verus_conds_debug {
