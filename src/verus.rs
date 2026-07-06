@@ -25,18 +25,12 @@ pub type DynError = Box<dyn std::error::Error>;
 ///
 
 #[cfg(target_os = "windows")]
-pub const VERUS_BIN: &str = "verus.exe";
-#[cfg(not(target_os = "windows"))]
-pub const VERUS_BIN: &str = "verus";
-
-#[cfg(target_os = "windows")]
 pub const CARGO_VERUS_BIN: &str = "cargo-verus.exe";
 #[cfg(not(target_os = "windows"))]
 pub const CARGO_VERUS_BIN: &str = "cargo-verus";
 
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
-pub const VERUS_EVN: &str = "VERUS_PATH";
 pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
 
 #[cfg(target_os = "windows")]
@@ -45,26 +39,11 @@ pub const VERUSFMT_BIN: &str = "verusfmt.exe";
 pub const VERUSFMT_BIN: &str = "verusfmt";
 
 #[cfg(target_os = "windows")]
-pub const RUST_VERIFY: &str = "rust_verify.exe";
-#[cfg(not(target_os = "windows"))]
-pub const RUST_VERIFY: &str = "rust_verify";
-
-#[cfg(target_os = "windows")]
-pub const Z3_BIN: &str = "z3.exe";
-#[cfg(not(target_os = "windows"))]
-pub const Z3_BIN: &str = "z3";
-
-#[cfg(target_os = "windows")]
 pub const DYN_LIB: &str = ".dll";
 #[cfg(target_os = "linux")]
 pub const DYN_LIB: &str = ".so";
 #[cfg(target_os = "macos")]
 pub const DYN_LIB: &str = ".dylib";
-
-pub const Z3_HINT: &str = "tools/verus/source";
-pub const Z3_EVN: &str = "VERUS_Z3_PATH";
-
-pub const RUSTDOC_BIN: &str = "rustdoc";
 
 #[cfg(target_os = "windows")]
 pub const VERUSDOC_BIN: &str = "verusdoc.exe";
@@ -72,17 +51,6 @@ pub const VERUSDOC_BIN: &str = "verusdoc.exe";
 pub const VERUSDOC_BIN: &str = "verusdoc";
 pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target/release";
 pub const VERUSDOC_HINT: &str = "tools/verus/source/target/debug";
-
-#[memoize]
-pub fn get_verus(release: bool) -> PathBuf {
-    executable::locate(
-            VERUS_BIN,
-            Some(VERUS_EVN),
-            if release { &[VERUS_HINT_RELEASE] } else {&[VERUS_HINT]},
-        ).unwrap_or_else(|| {
-            error!("Cannot find the Verus binary, please set the VERUS_PATH environment variable or add it to your PATH");
-        })
-}
 
 #[memoize]
 pub fn get_cargo_verus(release: bool) -> PathBuf {
@@ -100,44 +68,6 @@ pub fn get_cargo_verus(release: bool) -> PathBuf {
             "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade`, set CARGO_VERUS_PATH, or add cargo-verus to your PATH"
         );
     })
-}
-
-#[memoize]
-pub fn get_rust_verify(release: bool) -> PathBuf {
-    executable::locate(
-        RUST_VERIFY,
-        None,
-        if release {
-            &[VERUS_HINT_RELEASE]
-        } else {
-            &[VERUS_HINT]
-        },
-    )
-    .unwrap_or_else(|| {
-        error!("Cannot find the Verus `rust_verify` binary.");
-    })
-}
-
-#[memoize]
-pub fn get_z3() -> PathBuf {
-    executable::locate(
-            Z3_BIN,
-            Some(Z3_EVN),
-            &[Z3_HINT],
-        ).unwrap_or_else(|| {
-            error!("Cannot find the Z3 binary, please set the VERUS_Z3_PATH environment variable or add it to your PATH");
-        })
-}
-
-#[memoize]
-pub fn get_rustdoc() -> PathBuf {
-    executable::locate(
-            RUSTDOC_BIN,
-            None,
-            &[] as &[&str]
-        ).unwrap_or_else(|| {
-            error!("Cannot find the rustdoc binary, please install it using `rustup component add rust-docs`");
-        })
 }
 
 #[memoize]
