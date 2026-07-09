@@ -440,6 +440,15 @@ pub fn workspace_features(name: &str, metadata: &cargo_metadata::Metadata) -> Ve
         .unwrap_or_else(Vec::new)
 }
 
+fn package_verus_enabled(package: &cargo_metadata::Package) -> bool {
+    package
+        .metadata
+        .get("verus")
+        .and_then(|v| v.get("verify"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 #[memoize]
 pub fn verus_targets() -> HashMap<String, VerusTarget> {
     let metadata = cargo_metadata::MetadataCommand::new()
@@ -457,20 +466,7 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
 
     let mut targets: HashMap<String, VerusTarget> = HashMap::new();
     for package in metadata.packages.iter() {
-        if !workspace.contains(package.id.to_string().as_str())
-            || !package.features.contains_key("verify")
-        {
-            // Not a valid verus target
-            continue;
-        }
-
-        // check if features[verify] has "verus"
-        let has_verus = package
-            .features
-            .get("verify")
-            .map(|verifier| verifier.contains(&"verus".to_string()))
-            .unwrap_or(false);
-        if !has_verus {
+        if !workspace.contains(package.id.to_string().as_str()) || !package_verus_enabled(package) {
             // Not a valid verus target
             continue;
         }
