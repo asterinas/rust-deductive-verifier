@@ -3,7 +3,6 @@ use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::hash::Hash;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -13,7 +12,7 @@ use cargo_metadata;
 use cargo_metadata::CrateType;
 
 use crate::commands::CargoBuildExterns;
-use crate::{commands, dep_tree, executable, files, fingerprint, projects, serialization};
+use crate::{commands, dep_tree, executable, files, projects, serialization};
 
 pub type DynError = Box<dyn std::error::Error>;
 
@@ -250,70 +249,6 @@ impl VerusTarget {
         self.crate_type.clone()
     }
 
-    pub fn fingerprint(&self) -> String {
-        let content = fingerprint::fingerprint_dir(&self.dir);
-        fingerprint::fingerprint_as_str(&content)
-    }
-
-    pub fn fingerprint_recursive(&self, all_targets: &HashMap<String, VerusTarget>) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        let content = fingerprint::fingerprint_dir(&self.dir);
-        fingerprint::fingerprint_as_str(&content).hash(&mut hasher);
-        for dep in &self.dependencies {
-            if let Some(dep_target) = all_targets.get(&dep.name) {
-                dep_target
-                    .fingerprint_recursive(all_targets)
-                    .hash(&mut hasher);
-            }
-        }
-        hasher.finish().to_string()
-    }
-
-    pub fn is_fresh(&self, all_targets: &HashMap<String, VerusTarget>) -> bool {
-        let ts = self.library_proof_timestamp();
-        if !ts.exists() {
-            return false;
-        }
-
-        // Check if our own verification file exists
-        if !self.library_proof().exists() {
-            return false;
-        }
-
-        // Get our own timestamp
-        let self_timestamp = match std::fs::metadata(&self.library_proof()) {
-            Ok(metadata) => metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
-            Err(_) => return false,
-        };
-
-        // Check if all recursive dependencies have their verification files and are not newer than us
-        let deps = get_local_dependency(self);
-        for dep in deps.values() {
-            if !dep.library_proof().exists() {
-                return false;
-            }
-
-            // Check if dependency is newer than us
-            if let Ok(dep_metadata) = std::fs::metadata(&dep.library_proof()) {
-                if let Ok(dep_timestamp) = dep_metadata.modified() {
-                    if dep_timestamp > self_timestamp {
-                        return false; // Dependency is newer, we need to rebuild
-                    }
-                }
-            }
-        }
-
-        let ts_hash = self.load_library_proof_timestamp();
-        let cur_hash = self.fingerprint_recursive(all_targets);
-        if cur_hash == ts_hash {
-            return true;
-        }
-        false
-    }
-
     pub fn library_prefix(&self) -> String {
         match self.crate_type {
             CrateType::Bin => "",
@@ -340,40 +275,6 @@ impl VerusTarget {
         get_target_dir()
             .join(format!("{}.verusdata", self.name))
             .to_path_buf()
-    }
-
-    pub fn library_proof_timestamp(&self) -> PathBuf {
-        get_target_dir()
-            .join(format!("{}.verusdata.timestamp", self.name))
-            .to_path_buf()
-    }
-
-    pub fn load_library_proof_timestamp(&self) -> String {
-        let content = File::open(self.library_proof_timestamp())
-            .map(|mut f| {
-                let mut content = Vec::<u8>::new();
-                f.read_to_end(&mut content).unwrap_or_else(|e| {
-                    warn!("Failed to read library proof timestamp: {}", e);
-                    0
-                });
-                content
-            })
-            .unwrap_or_else(|e| {
-                warn!("Failed to open library proof timestamp: {}", e);
-                vec![]
-            });
-        String::from_utf8_lossy(&content).to_string()
-    }
-
-    pub fn save_library_proof_timestamp(&self, all_targets: &HashMap<String, VerusTarget>) {
-        let content = self.fingerprint_recursive(all_targets);
-        files::touch(self.library_proof_timestamp().to_string_lossy().as_ref());
-        let mut file = File::create(self.library_proof_timestamp()).unwrap_or_else(|e| {
-            error!("Failed to create library proof timestamp: {}", e);
-        });
-        file.write_all(content.as_bytes()).unwrap_or_else(|e| {
-            error!("Failed to write library proof timestamp: {}", e);
-        });
     }
 
     pub fn library_path(&self) -> PathBuf {

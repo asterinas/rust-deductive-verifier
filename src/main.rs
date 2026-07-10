@@ -48,13 +48,6 @@ enum Commands {
     Clean(CleanArgs),
 
     #[command(
-        name = "fingerprint",
-        about = "Print the fingerprint of the verification targets",
-        alias = "fp"
-    )]
-    Fingerprint(FingerprintArgs),
-
-    #[command(
         name = "list",
         about = "List all available verification targets",
         alias = "ls"
@@ -308,18 +301,6 @@ struct BuildArgs {
 struct CleanArgs {}
 
 #[derive(Parser, Debug)]
-struct FingerprintArgs {
-    #[arg(
-        short = 't',
-        long = "targets", 
-        value_parser = verus::find_target,
-        help = "The targets to fingerprint", 
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
-}
-
-#[derive(Parser, Debug)]
 struct ListTargetsArgs {}
 
 #[derive(Parser, Debug)]
@@ -488,14 +469,6 @@ fn build(args: &BuildArgs) -> Result<(), DynError> {
     verus::exec_build(&targets, &options)
 }
 
-fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
-    let targets = args.targets.clone();
-    for target in targets {
-        println!("{}: {}", target.name, target.fingerprint());
-    }
-    Ok(())
-}
-
 fn clean(_args: &CleanArgs) -> Result<(), DynError> {
     verus::exec_clean()
 }
@@ -567,7 +540,6 @@ fn main() {
         Commands::Doc(args) => doc(args),
         Commands::Bootstrap(args) => bootstrap(args),
         Commands::Build(args) => build(args),
-        Commands::Fingerprint(args) => fingerprint(args),
         Commands::ListTargets(args) => list_targets(args),
         Commands::NewTarget(args) => new_target(args),
         Commands::ShowItem(args) => show_item(args),
