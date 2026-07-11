@@ -48,13 +48,6 @@ enum Commands {
     Clean(CleanArgs),
 
     #[command(
-        name = "fingerprint",
-        about = "Print the fingerprint of the verification targets",
-        alias = "fp"
-    )]
-    Fingerprint(FingerprintArgs),
-
-    #[command(
         name = "list",
         about = "List all available verification targets",
         alias = "ls"
@@ -308,18 +301,6 @@ struct BuildArgs {
 struct CleanArgs {}
 
 #[derive(Parser, Debug)]
-struct FingerprintArgs {
-    #[arg(
-        short = 't',
-        long = "targets", 
-        value_parser = verus::find_target,
-        help = "The targets to fingerprint", 
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
-}
-
-#[derive(Parser, Debug)]
 struct ListTargetsArgs {}
 
 #[derive(Parser, Debug)]
@@ -424,13 +405,6 @@ struct FmtArgs {
 
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    // verify-only-module should only apply to the main target
-    // Conditions: exactly one target AND pass_through contains "--verify-only-module"
-    let verify_only_module_main_only = targets.len() == 1
-        && args
-            .pass_through
-            .iter()
-            .any(|arg| arg == "--verify-only-module" || arg.starts_with("--verify-only-module="));
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
         log: args.log,
@@ -440,7 +414,6 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         pass_through: args.pass_through.clone(),
         count_line: args.count_line,
         focus: args.focus,
-        verify_only_module_main_only,
     };
 
     verus::exec_verify(&targets, &options)
@@ -482,18 +455,9 @@ fn build(args: &BuildArgs) -> Result<(), DynError> {
         pass_through: args.pass_through.clone(),
         count_line: false,
         focus: false,
-        verify_only_module_main_only: false,
     };
 
     verus::exec_build(&targets, &options)
-}
-
-fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
-    let targets = args.targets.clone();
-    for target in targets {
-        println!("{}: {}", target.name, target.fingerprint());
-    }
-    Ok(())
 }
 
 fn clean(_args: &CleanArgs) -> Result<(), DynError> {
@@ -567,7 +531,6 @@ fn main() {
         Commands::Doc(args) => doc(args),
         Commands::Bootstrap(args) => bootstrap(args),
         Commands::Build(args) => build(args),
-        Commands::Fingerprint(args) => fingerprint(args),
         Commands::ListTargets(args) => list_targets(args),
         Commands::NewTarget(args) => new_target(args),
         Commands::ShowItem(args) => show_item(args),
