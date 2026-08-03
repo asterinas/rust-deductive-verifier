@@ -213,7 +213,7 @@ fn generate_single_target_doc(
 
     debug!("Running rustdoc for {}: {:?}", target.name, cmd);
 
-    let status = cmd.status()?;
+    let status = verus::run_filtered_command(&mut cmd)?;
     if !status.success() {
         return Err(format!("rustdoc failed for target: {}", target.name).into());
     }

@@ -649,7 +649,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         );
         debug!(">> {:?}", cmd);
 
-        let status = run_verify_command(cmd).unwrap_or_else(|e| {
+        let status = run_filtered_command(cmd).unwrap_or_else(|e| {
             error!("Error during verification: {}", e);
         });
 
@@ -718,7 +718,7 @@ const VERUS_SPEC_WARNING_START: &str =
 const VERUS_SPEC_WARNING_END: &str =
     "= note: this warning originates in the attribute macro `verus_spec`";
 
-fn run_verify_command(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
+pub fn run_filtered_command(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
     let configured_color = std::env::var_os("CARGO_TERM_COLOR");
     if should_force_cargo_color(std::io::stderr().is_terminal(), configured_color.as_deref()) {
         // Piping stderr for filtering would otherwise make Cargo disable the
@@ -730,13 +730,20 @@ fn run_verify_command(cmd: &mut Command) -> std::io::Result<std::process::ExitSt
     let child_stderr = child.stderr.take().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::Other,
-            "could not capture the verification process stderr",
+            "could not capture the process stderr",
         )
     })?;
 
     let filter_result =
         filter_verus_spec_warnings(BufReader::new(child_stderr), &mut std::io::stderr().lock());
     let status_result = child.wait();
+
+    // If stderr filtering failed (e.g. the writer closed), don't leave the
+    // child process orphaned and running during a long `make` flow.
+    if filter_result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     filter_result?;
     status_result
@@ -892,7 +899,7 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
         );
         debug!(">> {:?}", cmd);
 
-        let status = cmd.status().unwrap_or_else(|e| {
+        let status = run_filtered_command(cmd).unwrap_or_else(|e| {
             error!("Error during build: {}", e);
         });
 
