@@ -14,6 +14,7 @@ struct ToolchainConfig {
 struct Toolchain {
     channel: String,
     components: Option<Vec<String>>,
+    targets: Option<Vec<String>>,
 }
 
 impl ToolchainConfig {
