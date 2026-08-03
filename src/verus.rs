@@ -2,8 +2,9 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -648,7 +649,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         );
         debug!(">> {:?}", cmd);
 
-        let status = cmd.status().unwrap_or_else(|e| {
+        let status = run_verify_command(cmd).unwrap_or_else(|e| {
             error!("Error during verification: {}", e);
         });
 
@@ -710,6 +711,104 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         }
     }
     Ok(())
+}
+
+const VERUS_SPEC_WARNING_START: &str =
+    "warning: #[verus_spec] is likely used inside a verus! block.";
+const VERUS_SPEC_WARNING_END: &str =
+    "= note: this warning originates in the attribute macro `verus_spec`";
+
+fn run_verify_command(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
+    let configured_color = std::env::var_os("CARGO_TERM_COLOR");
+    if should_force_cargo_color(std::io::stderr().is_terminal(), configured_color.as_deref()) {
+        // Piping stderr for filtering would otherwise make Cargo disable the
+        // colors it normally emits to an interactive terminal.
+        cmd.env("CARGO_TERM_COLOR", "always");
+    }
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    let child_stderr = child.stderr.take().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "could not capture the verification process stderr",
+        )
+    })?;
+
+    let filter_result =
+        filter_verus_spec_warnings(BufReader::new(child_stderr), &mut std::io::stderr().lock());
+    let status_result = child.wait();
+
+    filter_result?;
+    status_result
+}
+
+fn should_force_cargo_color(stderr_is_terminal: bool, configured: Option<&OsStr>) -> bool {
+    stderr_is_terminal
+        && configured
+            .map(|value| value.eq_ignore_ascii_case("auto"))
+            .unwrap_or(true)
+}
+
+fn filter_verus_spec_warnings<R: BufRead, W: Write>(
+    reader: R,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    let mut candidate = Vec::new();
+    let mut suppress_following_blank_line = false;
+
+    for line in reader.lines() {
+        let line = line?;
+        let plain_line = strip_ansi_escape_codes(&line);
+
+        if suppress_following_blank_line {
+            suppress_following_blank_line = false;
+            if plain_line.trim().is_empty() {
+                continue;
+            }
+        }
+
+        if !candidate.is_empty() {
+            let is_warning_end = plain_line.contains(VERUS_SPEC_WARNING_END);
+            candidate.push(line);
+            if is_warning_end {
+                candidate.clear();
+                suppress_following_blank_line = true;
+            }
+            continue;
+        }
+
+        if plain_line.contains(VERUS_SPEC_WARNING_START) {
+            candidate.push(line);
+        } else {
+            writeln!(writer, "{line}")?;
+        }
+    }
+
+    // A truncated or changed diagnostic is not a confirmed match. Preserve it
+    // instead of accidentally hiding unrelated compiler output.
+    for line in candidate {
+        writeln!(writer, "{line}")?;
+    }
+    writer.flush()
+}
+
+fn strip_ansi_escape_codes(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.next_if_eq(&'[').is_some() {
+            for code in chars.by_ref() {
+                if ('@'..='~').contains(&code) {
+                    break;
+                }
+            }
+        } else {
+            plain.push(ch);
+        }
+    }
+
+    plain
 }
 
 fn verus_args_should_apply_to_roots_only(args: &[String]) -> bool {
