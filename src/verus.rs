@@ -26,6 +26,7 @@ pub type DynError = Box<dyn std::error::Error>;
 
 pub const CARGO_VERUS_BIN: &str = "cargo-verus";
 pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
+pub const VERIFICATION_RUST_TARGET: &str = "x86_64-unknown-none";
 
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
@@ -613,13 +614,15 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let ts_start = Instant::now();
         let cmd = &mut Command::new(get_cargo_verus(options.release));
-        cmd.arg(if options.focus { "focus" } else { "verify" });
+        cmd.env("RUSTC_BOOTSTRAP", "1")
+            .arg(if options.focus { "focus" } else { "verify" });
         if !options.focus && verus_args_should_apply_to_roots_only(&options.pass_through) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
         }
         if let Some(target) = target {
             cmd.arg("-p").arg(&target.name);
         }
+        cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
 
         let mut verus_args = Vec::new();
         if options.log {
@@ -864,13 +867,17 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
 pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
-        cmd.arg("build");
+        cmd.env("RUSTC_BOOTSTRAP", "1").arg("build");
+        if verus_args_should_apply_to_roots_only(&options.pass_through) {
+            cmd.arg("--fwd-verus-args-to").arg("roots");
+        }
         if let Some(target) = target {
             cmd.arg("-p").arg(&target.name);
         }
         if options.release {
             cmd.arg("--release");
         }
+        cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
 
         let mut verus_args = Vec::new();
         if options.log {
