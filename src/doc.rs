@@ -95,12 +95,21 @@ fn generate_single_target_doc(
     cmd.env("VERUSDOC", verus_doc_value);
     cmd.env("RUSTC_BOOTSTRAP", "1");
 
-    // Add extern dependencies for verus_builtin
-    let builtin_path = verus_target_dir.join("libverus_builtin.rlib");
+    // `cargo dv build` always builds with `--target <VERIFICATION_RUST_TARGET>`
+    // (x86_64-unknown-none), so the documentation must be generated for the same
+    // target triple to use those artifacts as externs. Regular libraries are
+    // resolved from the triple-prefixed target directory (falling back to the
+    // verus target directory), while proc-macro crates must remain at the host
+    // triple since they run during compilation.
+    cmd.arg("--target").arg(verus::VERIFICATION_RUST_TARGET);
+
+    // Add extern dependencies for verus_builtin (regular library -> target triple)
+    let builtin_path = find_dependency_artifact(&target_dir, "verus_builtin")
+        .unwrap_or_else(|| verus_target_dir.join("libverus_builtin.rlib"));
     cmd.arg("--extern")
         .arg(format!("verus_builtin={}", builtin_path.display()));
 
-    // Add extern dependencies for verus_builtin_macros
+    // Add extern dependencies for verus_builtin_macros (proc-macro -> host triple)
     let builtin_macros_path =
         verus_target_dir.join(format!("verus_builtin_macros{}", verus::DYN_LIB));
     cmd.arg("--extern").arg(format!(
@@ -167,7 +176,15 @@ fn generate_single_target_doc(
         }
     }
 
+    // `cargo dv build` always passes `--target <VERIFICATION_RUST_TARGET>`, so
+    // the built artifacts live under the triple-prefixed directories. Search
+    // those first and keep the bare `target/release` and `target/debug`
+    // directories as a fallback for artifacts built without an explicit target
+    // (e.g. the `dv` crate's own dependencies).
+    let triple = verus::VERIFICATION_RUST_TARGET;
     for deps_dir in [
+        target_dir.join(triple).join("release").join("deps"),
+        target_dir.join(triple).join("debug").join("deps"),
         target_dir.join("release").join("deps"),
         target_dir.join("debug").join("deps"),
     ] {
@@ -268,7 +285,10 @@ fn find_local_dependency_rlib(target_dir: &Path, dep_name: &str) -> Option<PathB
     let unversioned = format!("lib{extern_name}.rlib");
     let hashed_prefix = format!("lib{extern_name}-");
 
+    let triple = verus::VERIFICATION_RUST_TARGET;
     let exact_candidates = [
+        target_dir.join(triple).join("release").join(&unversioned),
+        target_dir.join(triple).join("debug").join(&unversioned),
         target_dir.join(&unversioned),
         target_dir.join("release").join(&unversioned),
         target_dir.join("debug").join(&unversioned),
@@ -280,6 +300,8 @@ fn find_local_dependency_rlib(target_dir: &Path, dep_name: &str) -> Option<PathB
     }
 
     let deps_dirs = [
+        target_dir.join(triple).join("release").join("deps"),
+        target_dir.join(triple).join("debug").join("deps"),
         target_dir.join("release").join("deps"),
         target_dir.join("debug").join("deps"),
     ];
@@ -300,7 +322,10 @@ fn find_dependency_artifact(target_dir: &Path, crate_name: &str) -> Option<PathB
 fn find_hashed_artifact(target_dir: &Path, crate_name: &str, extension: &str) -> Option<PathBuf> {
     let prefix = format!("lib{}-", crate_name.replace('-', "_"));
     let suffix = format!(".{extension}");
+    let triple = verus::VERIFICATION_RUST_TARGET;
     for deps_dir in [
+        target_dir.join(triple).join("release").join("deps"),
+        target_dir.join(triple).join("debug").join("deps"),
         target_dir.join("release").join("deps"),
         target_dir.join("debug").join("deps"),
     ] {
