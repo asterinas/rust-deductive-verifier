@@ -1127,16 +1127,40 @@ pub mod install {
         };
 
         let branch_name = branch.unwrap_or("main");
+        let clone_dir_existed = verus_dir.exists();
+        let cleanup_failed_clone = || -> Result<(), DynError> {
+            if !clone_dir_existed && verus_dir.exists() {
+                std::fs::remove_dir_all(verus_dir).map_err(|e| {
+                    format!(
+                        "Failed to clean up incomplete clone at {}: {}",
+                        verus_dir.display(),
+                        e
+                    )
+                })?;
+            }
+            Ok(())
+        };
 
         info!(
             "Cloning Verus repo from {} (branch: {}) to {} ...",
-            repo_ssh,
+            repo_https,
             branch_name,
             verus_dir.display()
         );
 
         let mut builder = git2::build::RepoBuilder::new();
         builder.branch(branch_name);
+
+        let https_error = match builder.clone(repo_https, verus_dir) {
+            Ok(_) => return Ok(()),
+            Err(e) => e,
+        };
+        cleanup_failed_clone()?;
+
+        info!("HTTPS failed, trying SSH: {}", repo_ssh);
+
+        let mut builder_ssh = git2::build::RepoBuilder::new();
+        builder_ssh.branch(branch_name);
 
         let mut callbacks = git2::RemoteCallbacks::new();
 
@@ -1146,22 +1170,18 @@ pub mod install {
 
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
-        builder.fetch_options(fetch_opts);
+        builder_ssh.fetch_options(fetch_opts);
+        let ssh_error = match builder_ssh.clone(repo_ssh, verus_dir) {
+            Ok(_) => return Ok(()),
+            Err(e) => e,
+        };
+        cleanup_failed_clone()?;
 
-        let ssh_result = builder.clone(repo_ssh, verus_dir);
-        if ssh_result.is_ok() {
-            return Ok(());
-        }
-
-        info!("SSH failed, trying HTTPS: {}", repo_https);
-
-        let mut builder_https = git2::build::RepoBuilder::new();
-        builder_https.branch(branch_name);
-        builder_https
-            .clone(repo_https, verus_dir)
-            .map_err(|e| format!("Failed to clone verus repo: {}", e))?;
-
-        Ok(())
+        Err(format!(
+            "Failed to clone Verus repo via HTTPS ({}) or SSH ({})",
+            https_error, ssh_error
+        )
+        .into())
     }
 
     #[cfg(target_os = "windows")]
