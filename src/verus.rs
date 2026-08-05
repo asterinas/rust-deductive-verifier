@@ -31,6 +31,9 @@ pub const VERIFICATION_RUST_TARGET: &str = "x86_64-unknown-none";
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
 
+pub const Z3_BIN: &str = "z3";
+pub const Z3_HINT: &str = "tools/verus/source";
+
 pub const VERUSFMT_BIN: &str = "verusfmt";
 
 #[cfg(target_os = "windows")]
@@ -43,8 +46,8 @@ pub const DYN_LIB: &str = ".dylib";
 pub const RUSTDOC_BIN: &str = "rustdoc";
 
 pub const VERUSDOC_BIN: &str = "verusdoc";
-pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target/release";
-pub const VERUSDOC_HINT: &str = "tools/verus/source/target/debug";
+pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
+pub const VERUSDOC_HINT: &str = "tools/verus/source/target-verus/debug";
 
 #[memoize]
 pub fn get_cargo_verus(release: bool) -> PathBuf {
@@ -62,6 +65,15 @@ pub fn get_cargo_verus(release: bool) -> PathBuf {
             "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade`, set CARGO_VERUS_PATH, or add cargo-verus to your PATH"
         );
     })
+}
+
+#[memoize]
+pub fn get_z3() -> PathBuf {
+    executable::locate(Z3_BIN, Some(CARGO_VERUS_ENV), &[Z3_HINT]).unwrap_or_else(|| {
+            error!(
+                "Cannot find the Z3 binary, please run `cargo dv bootstrap`, set CARGO_VERUS_PATH to the Verus toolchain directory, or add z3 to your PATH"
+            );
+        })
 }
 
 #[memoize]
@@ -611,10 +623,12 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         return Err("--count-line is currently unsupported with cargo-verus".into());
     }
 
+    let z3 = get_z3();
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let ts_start = Instant::now();
         let cmd = &mut Command::new(get_cargo_verus(options.release));
         cmd.env("RUSTC_BOOTSTRAP", "1")
+            .env("VERUS_Z3_PATH", &z3)
             .arg(if options.focus { "focus" } else { "verify" });
         if !options.focus && verus_args_should_apply_to_roots_only(&options.pass_through) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
@@ -865,9 +879,12 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
 }
 
 pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
+    let z3 = get_z3();
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let cmd = &mut Command::new(get_cargo_verus(options.release));
-        cmd.env("RUSTC_BOOTSTRAP", "1").arg("build");
+        cmd.env("RUSTC_BOOTSTRAP", "1")
+            .env("VERUS_Z3_PATH", &z3)
+            .arg("build");
         if verus_args_should_apply_to_roots_only(&options.pass_through) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
         }
@@ -1227,62 +1244,57 @@ pub mod install {
         Ok(())
     }
 
-    #[cfg(target_os = "windows")]
-    pub fn build_verus(release: bool) -> Result<(), DynError> {
-        let mut cmd = executable::get_powershell_command()?;
-        cmd.current_dir(verus_source_dir()).arg("/c").arg(format!(
-            "& '..\\tools\\activate.ps1'; vargo build {} --features singular",
-            if release { "--release" } else { "" }
-        ));
-        debug!("{:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verus: {}", e);
-        });
-
-        let mut verusdoc_cmd = executable::get_powershell_command()?;
-        verusdoc_cmd
-            .current_dir(verus_source_dir())
-            .arg("/c")
-            .arg("& '..\\tools\\activate.ps1'; vargo build -p verusdoc");
-        debug!("{:?}", verusdoc_cmd);
-        verusdoc_cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verusdoc: {}", e);
-        });
-
-        status!("Verus build complete");
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "windows"))]
     pub fn build_verus(release: bool) -> Result<(), DynError> {
         let toolchain = verus_dir().join("rust-toolchain.toml");
         let toolchain_name = toolchain::load_toolchain(&toolchain);
+        let source_dir = verus_source_dir();
 
-        let cmd = &mut Command::new("bash");
-        cmd.current_dir(verus_source_dir())
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .env("RUSTUP_TOOLCHAIN", toolchain_name.clone())
-            .arg("-c")
-            .arg(format!(
-                "source ../tools/activate; vargo build {} --features singular",
-                if release { "--release" } else { "" }
-            ));
-        debug!("{:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verus: {}", e);
-        });
+        let cargo = |subcommand: &str| {
+            let mut cmd = Command::new("cargo");
+            cmd.current_dir(&source_dir)
+                .env_remove("RUSTUP_TOOLCHAIN")
+                .env("RUSTUP_TOOLCHAIN", &toolchain_name)
+                .arg(subcommand);
+            cmd
+        };
 
-        let verusdoc_cmd = &mut Command::new("bash");
-        verusdoc_cmd
-            .current_dir(verus_source_dir())
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .env("RUSTUP_TOOLCHAIN", toolchain_name)
-            .arg("-c")
-            .arg("source ../tools/activate; vargo build -p verusdoc");
-        debug!("{:?}", verusdoc_cmd);
-        verusdoc_cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verusdoc: {}", e);
-        });
+        let clean_cmd = cargo("clean");
+
+        let mut build_cmd = cargo("build");
+        if release {
+            build_cmd.arg("--release");
+        }
+        build_cmd.args(["--features", "singular"]);
+
+        let mut vstd_cmd = cargo("run");
+        if release {
+            vstd_cmd.arg("--release");
+        }
+        vstd_cmd.args(["-p", "cargo-verus", "--", "build"]);
+        if release {
+            vstd_cmd.arg("--release");
+        }
+        vstd_cmd.args(["--manifest-path", "vstd/Cargo.toml"]);
+
+        for (mut cmd, description) in [
+            (clean_cmd, "Cleaning the Verus workspace"),
+            (build_cmd, "Building Verus"),
+            (vstd_cmd, "Building vstd"),
+        ] {
+            debug!("{:?}", cmd);
+            let status = cmd.status()?;
+            if !status.success() {
+                return Err(format!("{} failed with {}", description, status).into());
+            }
+        }
+
+        let profile = if release { "release" } else { "debug" };
+        File::create(
+            source_dir
+                .join("target-verus")
+                .join(profile)
+                .join("verus-root"),
+        )?;
 
         status!("Verus build complete");
         Ok(())

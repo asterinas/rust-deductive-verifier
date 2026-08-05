@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 
 use crate::{executable, helper::DynError, verus};
 
-const VERUSFMT_MIN_EDITION_VERSION: &str = "0.7.1";
+const VERUSFMT_MIN_EDITION_VERSION: &str = "0.7.2";
 
 fn get_verusfmt_path() -> Result<PathBuf, DynError> {
     executable::locate(verus::VERUSFMT_BIN, None, &Vec::<PathBuf>::new()).ok_or(
