@@ -74,9 +74,8 @@ where
     P: AsRef<Path> + ?Sized,
     D: AsRef<Path>,
 {
-    let path = env_var
-        .and_then(|e| locate_from_env(binary, e))
-        .or_else(|| locate_from_hints(binary, hints))
+    let path = locate_from_hints(binary, hints)
+        .or_else(|| env_var.and_then(|e| locate_from_env(binary, e)))
         .or_else(|| locate_from_path(binary));
 
     path.map(|path| files::absolutize(&path))
