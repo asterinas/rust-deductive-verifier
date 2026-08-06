@@ -70,6 +70,13 @@ enum Commands {
         alias = "f"
     )]
     Format(FmtArgs),
+
+    #[command(
+        name = "alignment-check",
+        about = "Check exec API alignment against an anchor repository",
+        alias = "align"
+    )]
+    AlignmentCheck(alignment_checker::cli::Args),
 }
 
 #[derive(Parser, Debug)]
@@ -524,6 +531,24 @@ fn format(args: &FmtArgs) -> Result<(), DynError> {
     Ok(())
 }
 
+fn alignment_check(args: &alignment_checker::cli::Args) -> Result<(), DynError> {
+    match alignment_checker::check_consistency(args) {
+        Ok(summary) => {
+            println!(
+                "Configuration consistency check passed: checked {} module{}, {} declared entr{}, {} actual delta{}",
+                summary.modules_checked,
+                alignment_checker::plural(summary.modules_checked),
+                summary.declared_entries,
+                alignment_checker::entry_plural(summary.declared_entries),
+                summary.actual_deltas,
+                alignment_checker::plural(summary.actual_deltas),
+            );
+            Ok(())
+        }
+        Err(e) => Err(format!("Configuration consistency check failed: {e:#}").into()),
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     if let Err(e) = match &cli.command {
@@ -536,6 +561,7 @@ fn main() {
         Commands::ShowItem(args) => show_item(args),
         Commands::Format(args) => format(args),
         Commands::Clean(args) => clean(args),
+        Commands::AlignmentCheck(args) => alignment_check(args),
     } {
         error!("Error when executing command `{:?}`: {}", cli.command, e);
     }

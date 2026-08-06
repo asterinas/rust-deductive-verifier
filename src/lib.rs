@@ -4,6 +4,7 @@ pub mod executable;
 pub mod files;
 #[macro_use]
 pub mod console;
+pub mod alignment_checker;
 pub mod commands;
 pub mod config;
 pub mod dep_tree;
