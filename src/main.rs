@@ -556,10 +556,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_accepts_irc11_build_argument() {
+    fn bootstrap_accepts_upstream_irc11_build_argument() {
         let cli = Cli::try_parse_from([
             "dv",
             "bootstrap",
+            "--upstream-verus",
             "--branch",
             "irc11",
             "--build-arg=--vstd-weak-memory",
@@ -569,6 +570,7 @@ mod tests {
         let Commands::Bootstrap(args) = cli.command else {
             panic!("expected bootstrap command");
         };
+        assert!(args.upstream_verus);
         assert_eq!(args.branch.as_deref(), Some("irc11"));
         assert_eq!(args.build_args, ["--vstd-weak-memory"]);
     }

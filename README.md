@@ -36,11 +36,13 @@ By default, `cargo dv bootstrap` builds the `main` branch of
 `--build-arg` to pass additional arguments to `cargo-verus` when it builds
 vstd.
 
-For example, the `irc11` branch requires its weak-memory vstd modules to be
+The `irc11` branch is hosted by `verus-lang/verus`, rather than the default
+`asterinas/verus` remote, and requires its weak-memory vstd modules to be
 enabled explicitly:
 
 ```bash
-cargo dv bootstrap --branch irc11 --build-arg=--vstd-weak-memory
+cargo dv bootstrap --upstream-verus --branch irc11 \
+  --build-arg=--vstd-weak-memory
 ```
 
 For compatibility with the `irc11` branch's vargo spelling, DV translates
@@ -50,7 +52,7 @@ For compatibility with the `irc11` branch's vargo spelling, DV translates
 The same arguments are honored by upgrades:
 
 ```bash
-cargo dv bootstrap --upgrade --branch irc11 \
+cargo dv bootstrap --upgrade --upstream-verus --branch irc11 \
   --build-arg=--vstd-weak-memory
 ```
 
