@@ -970,6 +970,7 @@ pub mod install {
         pub restart: bool,
         pub release: bool,
         pub branch: Option<String>,
+        pub build_args: Vec<String>,
         pub force_reset: bool,
         pub upstream_verus: bool,
     }
@@ -1264,7 +1265,29 @@ pub mod install {
         Ok(())
     }
 
-    pub fn build_verus(release: bool) -> Result<(), DynError> {
+    fn vstd_build_args(release: bool, extra_args: &[String]) -> Vec<String> {
+        let mut args = vec![
+            "-p".to_string(),
+            "cargo-verus".to_string(),
+            "--".to_string(),
+            "build".to_string(),
+        ];
+        if release {
+            args.push("--release".to_string());
+        }
+        args.extend(["--manifest-path".to_string(), "vstd/Cargo.toml".to_string()]);
+
+        for arg in extra_args {
+            if arg == "--vstd-weak-memory" {
+                args.extend(["--features".to_string(), "weak-memory".to_string()]);
+            } else {
+                args.push(arg.clone());
+            }
+        }
+        args
+    }
+
+    pub fn build_verus(release: bool, extra_args: &[String]) -> Result<(), DynError> {
         let toolchain = verus_dir().join("rust-toolchain.toml");
         let toolchain_name = toolchain::load_toolchain(&toolchain);
         let source_dir = verus_source_dir();
@@ -1290,11 +1313,7 @@ pub mod install {
         if release {
             vstd_cmd.arg("--release");
         }
-        vstd_cmd.args(["-p", "cargo-verus", "--", "build"]);
-        if release {
-            vstd_cmd.arg("--release");
-        }
-        vstd_cmd.args(["--manifest-path", "vstd/Cargo.toml"]);
+        vstd_cmd.args(vstd_build_args(release, extra_args));
 
         for (mut cmd, description) in [
             (clean_cmd, "Cleaning the Verus workspace"),
@@ -1341,7 +1360,7 @@ pub mod install {
         install_z3()?;
 
         // Build Verus
-        build_verus(options.release)?;
+        build_verus(options.release, &options.build_args)?;
 
         // Update the workspace toolchain
         toolchain::sync_toolchain(
@@ -1547,7 +1566,7 @@ pub mod install {
         status!("Verus repo updated to the latest version");
 
         // Build Verus
-        build_verus(options.release)?;
+        build_verus(options.release, &options.build_args)?;
 
         // Update the workspace toolchain
         toolchain::sync_toolchain(
@@ -1560,5 +1579,46 @@ pub mod install {
 
         status!("Verus upgrade complete");
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn irc11_build_argument_enables_weak_memory_for_vstd() {
+            let extra_args = vec!["--vstd-weak-memory".to_string()];
+            assert_eq!(
+                vstd_build_args(true, &extra_args),
+                [
+                    "-p",
+                    "cargo-verus",
+                    "--",
+                    "build",
+                    "--release",
+                    "--manifest-path",
+                    "vstd/Cargo.toml",
+                    "--features",
+                    "weak-memory",
+                ]
+            );
+        }
+
+        #[test]
+        fn extra_vstd_build_arguments_are_forwarded() {
+            let extra_args = vec!["--locked".to_string()];
+            assert_eq!(
+                vstd_build_args(false, &extra_args),
+                [
+                    "-p",
+                    "cargo-verus",
+                    "--",
+                    "build",
+                    "--manifest-path",
+                    "vstd/Cargo.toml",
+                    "--locked",
+                ]
+            );
+        }
     }
 }
