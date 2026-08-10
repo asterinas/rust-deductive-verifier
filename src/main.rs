@@ -37,26 +37,15 @@ enum Commands {
     )]
     Bootstrap(BootstrapArgs),
 
-    #[command(
-        name = "compile",
-        about = "Compile the verification targets",
-        alias = "c"
-    )]
-    Compile(CompileArgs),
+    #[command(name = "build", about = "Build the verification targets", alias = "c")]
+    Build(BuildArgs),
 
     #[command(
         name = "clean",
-        about = "Clean build artefacts produced by `cargo dv compile`",
+        about = "Run `cargo clean` for the workspace",
         alias = "cl"
     )]
     Clean(CleanArgs),
-
-    #[command(
-        name = "fingerprint",
-        about = "Print the fingerprint of the verification targets",
-        alias = "fp"
-    )]
-    Fingerprint(FingerprintArgs),
 
     #[command(
         name = "list",
@@ -127,7 +116,7 @@ struct BootstrapArgs {
 
     #[arg(
         long = "build-arg",
-        help = "An extra argument passed to `vargo build` when building Verus",
+        help = "An extra argument passed to `cargo-verus` when building vstd",
         value_name = "ARG",
         action = ArgAction::Append,
         allow_hyphen_values = true
@@ -158,7 +147,7 @@ struct VerifyArgs {
         short = 'i',
         long = "import", 
         value_parser = verus::find_target,
-        help = "Import verified local crates (they need to be compiled first)",
+        help = "Import verified local crates (they need to be built first)",
         num_args = 0..,
         action = ArgAction::Append)]
     imports: Vec<VerusTarget>,
@@ -188,6 +177,15 @@ struct VerifyArgs {
         action = ArgAction::SetTrue
     )]
     debug: bool,
+
+    #[arg(
+        short = 'f',
+        long = "focus",
+        help = "Verify root crates without re-checking dependency proofs",
+        default_value = "false",
+        action = ArgAction::SetTrue
+    )]
+    focus: bool,
 
     #[arg(
         last = true,
@@ -240,12 +238,12 @@ struct DocArgs {
 }
 
 #[derive(Parser, Debug)]
-struct CompileArgs {
+struct BuildArgs {
     #[arg(
         short = 't',
         long = "targets",
         value_parser = verus::find_target,
-        help = "The targets to compile",
+        help = "The targets to build",
         num_args = 0..,
         action = ArgAction::Append)]
     targets: Vec<VerusTarget>,
@@ -254,7 +252,7 @@ struct CompileArgs {
         short = 'i',
         long = "import", 
         value_parser = verus::find_target,
-        help = "Import verified local crates (they need to be compiled first)",
+        help = "Import verified local crates (they need to be built first)",
         num_args = 0..,
         action = ArgAction::Append)]
     imports: Vec<VerusTarget>,
@@ -296,7 +294,7 @@ struct CompileArgs {
         short = 'a',
         long = "disasm",
         default_value = "false",
-        help = "Do not disassemble the compiled binary",
+        help = "Do not disassemble the built binary",
         action = ArgAction::SetTrue)]
     disasm: bool,
 
@@ -309,34 +307,7 @@ struct CompileArgs {
 }
 
 #[derive(Parser, Debug)]
-struct CleanArgs {
-    #[arg(
-        short = 't',
-        long = "targets",
-        value_parser = verus::find_target,
-        help = "The targets to clean",
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
-    #[arg(
-        long = "all",
-        help = "Clean verification artifacts for all workspace targets",
-        default_value = "false",
-        action = ArgAction::SetTrue)]
-    all: bool,
-}
-
-#[derive(Parser, Debug)]
-struct FingerprintArgs {
-    #[arg(
-        short = 't',
-        long = "targets", 
-        value_parser = verus::find_target,
-        help = "The targets to fingerprint", 
-        num_args = 0..,
-        action = ArgAction::Append)]
-    targets: Vec<VerusTarget>,
-}
+struct CleanArgs {}
 
 #[derive(Parser, Debug)]
 struct ListTargetsArgs {}
@@ -443,14 +414,6 @@ struct FmtArgs {
 
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    let imports = args.imports.clone();
-    // verify-only-module should only apply to the main target
-    // Conditions: exactly one target AND pass_through contains "--verify-only-module"
-    let verify_only_module_main_only = targets.len() == 1
-        && args
-            .pass_through
-            .iter()
-            .any(|arg| arg == "--verify-only-module" || arg.starts_with("--verify-only-module="));
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
         log: args.log,
@@ -459,10 +422,10 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         disasm: false,
         pass_through: args.pass_through.clone(),
         count_line: args.count_line,
-        verify_only_module_main_only,
+        focus: args.focus,
     };
 
-    verus::exec_verify(&targets, &imports, &options)
+    verus::exec_verify(&targets, &options)
 }
 
 fn doc(args: &DocArgs) -> Result<(), DynError> {
@@ -491,9 +454,8 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
     }
 }
 
-fn compile(args: &CompileArgs) -> Result<(), DynError> {
+fn build(args: &BuildArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
-    let imports = args.imports.clone();
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
         log: args.log,
@@ -502,28 +464,14 @@ fn compile(args: &CompileArgs) -> Result<(), DynError> {
         disasm: args.disasm,
         pass_through: args.pass_through.clone(),
         count_line: false,
-        verify_only_module_main_only: false,
+        focus: false,
     };
 
-    verus::exec_compile(&targets, &imports, &options)
+    verus::exec_build(&targets, &options)
 }
 
-fn fingerprint(args: &FingerprintArgs) -> Result<(), DynError> {
-    let targets = args.targets.clone();
-    for target in targets {
-        println!("{}: {}", target.name, target.fingerprint());
-    }
-    Ok(())
-}
-
-fn clean(args: &CleanArgs) -> Result<(), DynError> {
-    let targets = args.targets.clone();
-    // if --all provided, pass empty targets with all=true to verus
-    if args.all {
-        verus::exec_clean(&[], true)
-    } else {
-        verus::exec_clean(&targets, false)
-    }
+fn clean(_args: &CleanArgs) -> Result<(), DynError> {
+    verus::exec_clean()
 }
 
 fn list_targets(_args: &ListTargetsArgs) -> Result<(), DynError> {
@@ -592,8 +540,7 @@ fn main() {
         Commands::Verify(args) => verify(args),
         Commands::Doc(args) => doc(args),
         Commands::Bootstrap(args) => bootstrap(args),
-        Commands::Compile(args) => compile(args),
-        Commands::Fingerprint(args) => fingerprint(args),
+        Commands::Build(args) => build(args),
         Commands::ListTargets(args) => list_targets(args),
         Commands::NewTarget(args) => new_target(args),
         Commands::ShowItem(args) => show_item(args),
@@ -609,7 +556,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_accepts_irc11_vargo_build_argument() {
+    fn bootstrap_accepts_irc11_build_argument() {
         let cli = Cli::try_parse_from([
             "dv",
             "bootstrap",

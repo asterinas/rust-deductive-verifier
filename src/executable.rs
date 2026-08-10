@@ -3,15 +3,25 @@ use crate::files;
 use std::env;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "windows")]
+const EXE_SUFFIX: &str = ".exe";
+#[cfg(not(target_os = "windows"))]
+const EXE_SUFFIX: &str = "";
+
+fn bin_name(binary: &Path) -> PathBuf {
+    PathBuf::from(format!("{}{}", binary.display(), EXE_SUFFIX))
+}
+
 pub fn locate_from_path<P>(binary: &P) -> Option<PathBuf>
 where
     P: AsRef<Path> + ?Sized,
 {
+    let binary = bin_name(binary.as_ref());
     let path = env::var("PATH").ok()?;
     let paths = env::split_paths(&path);
     paths
         .filter_map(|dir| {
-            let full = dir.join(binary);
+            let full = dir.join(&binary);
             if full.is_file() {
                 Some(full)
             } else {
@@ -26,10 +36,11 @@ where
     P: AsRef<Path> + ?Sized,
     D: AsRef<Path>,
 {
+    let binary = bin_name(binary.as_ref());
     hints
         .iter()
         .filter_map(|hint| {
-            let full = hint.as_ref().join(binary);
+            let full = hint.as_ref().join(&binary);
             if full.is_file() {
                 Some(full)
             } else {
@@ -43,11 +54,12 @@ pub fn locate_from_env<P>(binary: &P, env_var: &str) -> Option<PathBuf>
 where
     P: AsRef<Path> + ?Sized,
 {
+    let binary = bin_name(binary.as_ref());
     let env_path = env::var(env_var).ok()?;
     let paths = env::split_paths(&env_path);
     paths
         .filter_map(|dir| {
-            let full = dir.join(binary);
+            let full = dir.join(&binary);
             if full.is_file() {
                 Some(full)
             } else {
@@ -62,9 +74,8 @@ where
     P: AsRef<Path> + ?Sized,
     D: AsRef<Path>,
 {
-    let path = env_var
-        .and_then(|e| locate_from_env(binary, e))
-        .or_else(|| locate_from_hints(binary, hints))
+    let path = locate_from_hints(binary, hints)
+        .or_else(|| env_var.and_then(|e| locate_from_env(binary, e)))
         .or_else(|| locate_from_path(binary));
 
     path.map(|path| files::absolutize(&path))

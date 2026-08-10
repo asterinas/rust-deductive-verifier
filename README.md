@@ -1,5 +1,12 @@
 # Rust Deductive Verifier
 
+`cargo dv` is a thin project-specific wrapper around `cargo-verus`.
+Verification and build commands are delegated to `cargo-verus verify`,
+`cargo-verus focus`, and `cargo-verus build`,
+while `cargo dv` keeps a few repository conveniences on top,
+such as bootstrapping the Verus toolchain, formatting Verus/Rust sources,
+generating docs, and running pre-commit checks.
+
 ## Deployment
 
 1. Put this repository as a directory `dv` in the root of your Rust project.
@@ -26,7 +33,8 @@ cargo dv verify --targets <target1> <target2> ...
 
 By default, `cargo dv bootstrap` builds the `main` branch of
 `asterinas/verus`. Use `--branch` to select another branch and repeat
-`--build-arg` to pass additional arguments to that branch's `vargo build`.
+`--build-arg` to pass additional arguments to `cargo-verus` when it builds
+vstd.
 
 For example, the `irc11` branch requires its weak-memory vstd modules to be
 enabled explicitly:
@@ -34,6 +42,10 @@ enabled explicitly:
 ```bash
 cargo dv bootstrap --branch irc11 --build-arg=--vstd-weak-memory
 ```
+
+For compatibility with the `irc11` branch's vargo spelling, DV translates
+`--vstd-weak-memory` to the vstd feature arguments
+`--features weak-memory` used by the current cargo-verus bootstrap path.
 
 The same arguments are honored by upgrades:
 

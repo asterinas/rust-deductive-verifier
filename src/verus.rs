@@ -2,10 +2,9 @@ use colored::Colorize;
 use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
-use std::env;
+use std::ffi::OsStr;
 use std::fs::{self, File};
-use std::hash::Hash;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -14,10 +13,7 @@ use cargo_metadata;
 use cargo_metadata::CrateType;
 
 use crate::commands::CargoBuildExterns;
-use crate::generator::Generative;
-use crate::{
-    commands, dep_tree, executable, files, fingerprint, generator, projects, serialization,
-};
+use crate::{commands, dep_tree, executable, files, projects, serialization};
 
 pub type DynError = Box<dyn std::error::Error>;
 
@@ -28,29 +24,17 @@ pub type DynError = Box<dyn std::error::Error>;
 /// It also provides a method to get the root directory of the project.
 ///
 
-#[cfg(target_os = "windows")]
-pub const VERUS_BIN: &str = "verus.exe";
-#[cfg(not(target_os = "windows"))]
-pub const VERUS_BIN: &str = "verus";
+pub const CARGO_VERUS_BIN: &str = "cargo-verus";
+pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
+pub const VERIFICATION_RUST_TARGET: &str = "x86_64-unknown-none";
 
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
-pub const VERUS_EVN: &str = "VERUS_PATH";
 
-#[cfg(target_os = "windows")]
-pub const VERUSFMT_BIN: &str = "verusfmt.exe";
-#[cfg(not(target_os = "windows"))]
-pub const VERUSFMT_BIN: &str = "verusfmt";
-
-#[cfg(target_os = "windows")]
-pub const RUST_VERIFY: &str = "rust_verify.exe";
-#[cfg(not(target_os = "windows"))]
-pub const RUST_VERIFY: &str = "rust_verify";
-
-#[cfg(target_os = "windows")]
-pub const Z3_BIN: &str = "z3.exe";
-#[cfg(not(target_os = "windows"))]
 pub const Z3_BIN: &str = "z3";
+pub const Z3_HINT: &str = "tools/verus/source";
+
+pub const VERUSFMT_BIN: &str = "verusfmt";
 
 #[cfg(target_os = "windows")]
 pub const DYN_LIB: &str = ".dll";
@@ -59,53 +43,36 @@ pub const DYN_LIB: &str = ".so";
 #[cfg(target_os = "macos")]
 pub const DYN_LIB: &str = ".dylib";
 
-pub const Z3_HINT: &str = "tools/verus/source";
-pub const Z3_EVN: &str = "VERUS_Z3_PATH";
-
 pub const RUSTDOC_BIN: &str = "rustdoc";
 
-#[cfg(target_os = "windows")]
-pub const VERUSDOC_BIN: &str = "verusdoc.exe";
-#[cfg(not(target_os = "windows"))]
 pub const VERUSDOC_BIN: &str = "verusdoc";
-pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target/release";
-pub const VERUSDOC_HINT: &str = "tools/verus/source/target/debug";
+pub const VERUSDOC_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
+pub const VERUSDOC_HINT: &str = "tools/verus/source/target-verus/debug";
 
 #[memoize]
-pub fn get_verus(release: bool) -> PathBuf {
+pub fn get_cargo_verus(release: bool) -> PathBuf {
     executable::locate(
-            VERUS_BIN,
-            Some(VERUS_EVN),
-            if release { &[VERUS_HINT_RELEASE] } else {&[VERUS_HINT]},
-        ).unwrap_or_else(|| {
-            error!("Cannot find the Verus binary, please set the VERUS_PATH environment variable or add it to your PATH");
-        })
-}
-
-#[memoize]
-pub fn get_rust_verify(release: bool) -> PathBuf {
-    executable::locate(
-        RUST_VERIFY,
-        None,
+        CARGO_VERUS_BIN,
+        Some(CARGO_VERUS_ENV),
         if release {
-            &[VERUS_HINT_RELEASE]
+            &[VERUS_HINT_RELEASE, VERUS_HINT]
         } else {
-            &[VERUS_HINT]
+            &[VERUS_HINT, VERUS_HINT_RELEASE]
         },
     )
     .unwrap_or_else(|| {
-        error!("Cannot find the Verus `rust_verify` binary.");
+        error!(
+            "Cannot find the cargo-verus binary, please run `cargo dv bootstrap --upgrade`, set CARGO_VERUS_PATH, or add cargo-verus to your PATH"
+        );
     })
 }
 
 #[memoize]
 pub fn get_z3() -> PathBuf {
-    executable::locate(
-            Z3_BIN,
-            Some(Z3_EVN),
-            &[Z3_HINT],
-        ).unwrap_or_else(|| {
-            error!("Cannot find the Z3 binary, please set the VERUS_Z3_PATH environment variable or add it to your PATH");
+    executable::locate(Z3_BIN, Some(CARGO_VERUS_ENV), &[Z3_HINT]).unwrap_or_else(|| {
+            error!(
+                "Cannot find the Z3 binary, please run `cargo dv bootstrap`, set CARGO_VERUS_PATH to the Verus toolchain directory, or add z3 to your PATH"
+            );
         })
 }
 
@@ -235,50 +202,8 @@ pub struct ExtraOptions {
     pub pass_through: Vec<String>,
     /// count lines of code
     pub count_line: bool,
-    /// verify-only-module should only apply to the main target, not its dependencies
-    pub verify_only_module_main_only: bool,
-}
-
-impl ExtraOptions {
-    /// Create a modified version of options for dependency compilation
-    /// If verify_only_module_main_only is true, removes the verify-only-module parameter
-    /// since it should only apply to the main target
-    pub fn for_dependency(&self) -> Self {
-        let pass_through = if self.verify_only_module_main_only {
-            let mut filtered = Vec::new();
-            let mut skip_next = false;
-
-            for arg in self.pass_through.iter() {
-                if skip_next {
-                    skip_next = false;
-                    continue;
-                }
-
-                if arg == "--verify-only-module" {
-                    // Skip this argument and the next one (the module name)
-                    skip_next = true;
-                } else if arg.starts_with("--verify-only-module=") {
-                    // Skip inline form: --verify-only-module=<path>
-                } else {
-                    filtered.push(arg.clone());
-                }
-            }
-            filtered
-        } else {
-            self.pass_through.clone()
-        };
-
-        ExtraOptions {
-            log: self.log,
-            trace: self.trace,
-            release: self.release,
-            max_errors: self.max_errors,
-            disasm: self.disasm,
-            pass_through,
-            count_line: self.count_line,
-            verify_only_module_main_only: self.verify_only_module_main_only,
-        }
-    }
+    /// use cargo-verus focus instead of cargo-verus verify
+    pub focus: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -291,70 +216,6 @@ impl VerusTarget {
 
     pub fn crate_type(&self) -> CrateType {
         self.crate_type.clone()
-    }
-
-    pub fn fingerprint(&self) -> String {
-        let content = fingerprint::fingerprint_dir(&self.dir);
-        fingerprint::fingerprint_as_str(&content)
-    }
-
-    pub fn fingerprint_recursive(&self, all_targets: &HashMap<String, VerusTarget>) -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        let content = fingerprint::fingerprint_dir(&self.dir);
-        fingerprint::fingerprint_as_str(&content).hash(&mut hasher);
-        for dep in &self.dependencies {
-            if let Some(dep_target) = all_targets.get(&dep.name) {
-                dep_target
-                    .fingerprint_recursive(all_targets)
-                    .hash(&mut hasher);
-            }
-        }
-        hasher.finish().to_string()
-    }
-
-    pub fn is_fresh(&self, all_targets: &HashMap<String, VerusTarget>) -> bool {
-        let ts = self.library_proof_timestamp();
-        if !ts.exists() {
-            return false;
-        }
-
-        // Check if our own verification file exists
-        if !self.library_proof().exists() {
-            return false;
-        }
-
-        // Get our own timestamp
-        let self_timestamp = match std::fs::metadata(&self.library_proof()) {
-            Ok(metadata) => metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
-            Err(_) => return false,
-        };
-
-        // Check if all recursive dependencies have their verification files and are not newer than us
-        let deps = get_local_dependency(self);
-        for dep in deps.values() {
-            if !dep.library_proof().exists() {
-                return false;
-            }
-
-            // Check if dependency is newer than us
-            if let Ok(dep_metadata) = std::fs::metadata(&dep.library_proof()) {
-                if let Ok(dep_timestamp) = dep_metadata.modified() {
-                    if dep_timestamp > self_timestamp {
-                        return false; // Dependency is newer, we need to rebuild
-                    }
-                }
-            }
-        }
-
-        let ts_hash = self.load_library_proof_timestamp();
-        let cur_hash = self.fingerprint_recursive(all_targets);
-        if cur_hash == ts_hash {
-            return true;
-        }
-        false
     }
 
     pub fn library_prefix(&self) -> String {
@@ -383,40 +244,6 @@ impl VerusTarget {
         get_target_dir()
             .join(format!("{}.verusdata", self.name))
             .to_path_buf()
-    }
-
-    pub fn library_proof_timestamp(&self) -> PathBuf {
-        get_target_dir()
-            .join(format!("{}.verusdata.timestamp", self.name))
-            .to_path_buf()
-    }
-
-    pub fn load_library_proof_timestamp(&self) -> String {
-        let content = File::open(self.library_proof_timestamp())
-            .map(|mut f| {
-                let mut content = Vec::<u8>::new();
-                f.read_to_end(&mut content).unwrap_or_else(|e| {
-                    warn!("Failed to read library proof timestamp: {}", e);
-                    0
-                });
-                content
-            })
-            .unwrap_or_else(|e| {
-                warn!("Failed to open library proof timestamp: {}", e);
-                vec![]
-            });
-        String::from_utf8_lossy(&content).to_string()
-    }
-
-    pub fn save_library_proof_timestamp(&self, all_targets: &HashMap<String, VerusTarget>) {
-        let content = self.fingerprint_recursive(all_targets);
-        files::touch(self.library_proof_timestamp().to_string_lossy().as_ref());
-        let mut file = File::create(self.library_proof_timestamp()).unwrap_or_else(|e| {
-            error!("Failed to create library proof timestamp: {}", e);
-        });
-        file.write_all(content.as_bytes()).unwrap_or_else(|e| {
-            error!("Failed to write library proof timestamp: {}", e);
-        });
     }
 
     pub fn library_path(&self) -> PathBuf {
@@ -483,6 +310,15 @@ pub fn workspace_features(name: &str, metadata: &cargo_metadata::Metadata) -> Ve
         .unwrap_or_else(Vec::new)
 }
 
+fn package_verus_enabled(package: &cargo_metadata::Package) -> bool {
+    package
+        .metadata
+        .get("verus")
+        .and_then(|v| v.get("verify"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 #[memoize]
 pub fn verus_targets() -> HashMap<String, VerusTarget> {
     let metadata = cargo_metadata::MetadataCommand::new()
@@ -500,20 +336,7 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
 
     let mut targets: HashMap<String, VerusTarget> = HashMap::new();
     for package in metadata.packages.iter() {
-        if !workspace.contains(package.id.to_string().as_str())
-            || !package.features.contains_key("verify")
-        {
-            // Not a valid verus target
-            continue;
-        }
-
-        // check if features[verify] has "verus"
-        let has_verus = package
-            .features
-            .get("verify")
-            .map(|verifier| verifier.contains(&"verus".to_string()))
-            .unwrap_or(false);
-        if !has_verus {
+        if !workspace.contains(package.id.to_string().as_str()) || !package_verus_enabled(package) {
             // Not a valid verus target
             continue;
         }
@@ -651,34 +474,6 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
     result
 }
 
-pub fn get_dependent_targets(target: &VerusTarget, release: bool) -> IndexMap<String, VerusTarget> {
-    let mut deps = get_local_dependency(target);
-    let order = resolve_deps_cached(target, release).full_externs;
-    deps.sort_by(|a, _, b, _| {
-        let x = order.get_index_of(a).unwrap_or(usize::MAX);
-        let y = order.get_index_of(b).unwrap_or(usize::MAX);
-        x.cmp(&y)
-    });
-    deps
-}
-
-pub fn get_dependent_targets_batch(
-    targets: &[VerusTarget],
-    release: bool,
-) -> IndexMap<String, VerusTarget> {
-    let mut deps = IndexMap::new();
-    for target in targets.iter() {
-        deps.extend(get_local_dependency(target));
-    }
-    let order = resolve_deps_cached(targets.first().unwrap(), release).full_externs;
-    deps.sort_by(|a, _, b, _| {
-        let x = order.get_index_of(a).unwrap_or(usize::MAX);
-        let y = order.get_index_of(b).unwrap_or(usize::MAX);
-        x.cmp(&y)
-    });
-    deps
-}
-
 pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<String, String> {
     let externs = resolve_deps_cached(target, release).renamed_full_externs();
 
@@ -703,37 +498,6 @@ pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<St
     }
 
     deps
-}
-
-pub fn cmd_push_import(cmd: &mut Command, imports: &[&VerusTarget]) {
-    for imp in imports.iter() {
-        cmd.arg("--import")
-            .arg(format!("{}={}", imp.name, imp.library_proof().display()));
-        cmd.arg("--extern")
-            .arg(format!("{}={}", imp.name, imp.library_path().display()));
-    }
-}
-
-pub fn check_imports_compiled(imports: &[&VerusTarget]) -> Result<(), DynError> {
-    for imp in imports.iter() {
-        if !imp.library_proof().exists() {
-            return Err(format!(
-                "Cannot find the proof file at `{}` for `{}`",
-                imp.library_proof().display(),
-                imp.name
-            )
-            .into());
-        }
-        if !imp.library_path().exists() {
-            return Err(format!(
-                "Cannot find the library file at `{}` for `{}`",
-                imp.library_path().display(),
-                imp.name
-            )
-            .into());
-        }
-    }
-    Ok(())
 }
 
 pub fn check_externs(externs: &IndexMap<String, String>) -> Result<(), DynError> {
@@ -800,45 +564,6 @@ pub fn resolve_deps_cached(target: &VerusTarget, release: bool) -> serialization
     }
 }
 
-pub fn gen_extern_crates(target: &VerusTarget, release: bool) {
-    let externs = resolve_deps_cached(target, release);
-    let mut tmpl = generator::ExternCratesTemplate { crates: Vec::new() };
-
-    let local_deps = target
-        .dependencies
-        .iter()
-        .filter(|dep| dep.path.is_some())
-        .map(|dep| dep.name.replace('-', "_"))
-        .collect::<HashSet<_>>();
-
-    for name in externs.full_externs.keys() {
-        if system_crates().contains(name.as_str()) {
-            // Skip system crates
-            continue;
-        }
-
-        if local_deps.contains(name) {
-            // Skip local dependencies
-            continue;
-        }
-
-        tmpl.crates.push(generator::CrateInfo {
-            name: name.clone(),
-            alias: None,
-        });
-    }
-
-    let deps_path = get_target_dir().join(format!("{}.deps.toml", target.name));
-    let deps_time = files::modify_time(deps_path);
-    let crates_path = get_target_dir().join(format!("{}.extern_crates.rs", target.name));
-
-    tmpl.save_if(&crates_path, &deps_time);
-}
-
-pub fn prepare(target: &VerusTarget, release: bool) {
-    gen_extern_crates(target, release);
-}
-
 /// Move files from workspace `.verus-log` root into a per-crate subdirectory.
 fn move_verus_log_files(crate_name: &str) {
     let workspace_root = get_workspace_root();
@@ -891,379 +616,57 @@ fn move_verus_log_files(crate_name: &str) {
     }
 }
 
-fn get_build_dir(release: bool) -> &'static str {
-    if release {
-        "release"
-    } else {
-        "debug"
+pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
+    if options.count_line {
+        eprintln!("Error: --count-line is currently unsupported with cargo-verus");
+        // TODO: Re-enable this path once cargo-verus can produce the dep-info expected by Verus' line_count tool.
+        return Err("--count-line is currently unsupported with cargo-verus".into());
     }
-}
 
-/// Compile a single target using the Verus verifier.
-///
-/// This function directly invokes the Verus compiler on a single target.
-/// It handles dependency setup, external crate linking, and compilation options.
-/// It does NOT recursively compile dependencies, an error will occur if dependencies
-/// are missing. To compile a target along with its dependencies,
-///  - use `compile_target_with_dependencies` for that.
-///
-/// # Arguments
-///
-/// * `target` - The target to compile
-/// * `imports` - Additional targets to import (not auto-discovered)
-/// * `options` - Compilation options (log, trace, release, max_errors, disasm, pass_through)
-pub fn compile_single_target(
-    target: &VerusTarget,
-    imports: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
-    let ts_start = Instant::now();
-
-    let verus = get_verus(options.release);
     let z3 = get_z3();
-    let extra_imports = imports
-        .iter()
-        .map(|target| (target.name.clone(), target.clone()))
-        .collect::<IndexMap<_, _>>();
-
-    let out_dir = get_target_dir();
-    if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            error!("Error creating target directory: {}", e);
-        });
-    }
-    let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
-
-    prepare(target, options.release);
-
-    let mut deps = get_local_dependency(target);
-    let dep_rebuilt = deps.values().into_iter().any(|t| t.rebuilt == true);
-
-    if !dep_rebuilt && target.is_fresh(&verus_targets()) {
-        info!(
-            "[Fresh] `{}` is up to date, skipping verification",
-            target.name
-        );
-        return Ok(());
-    }
-
-    let cmd = &mut Command::new(&verus);
-
-    // setup the environment
-    cmd.env("VERUS_PATH", &verus).env("VERUS_Z3_PATH", &z3);
-    cmd.args([
-        "-L",
-        &format!("dependency={}", deps_dir.display()),
-        "-L",
-        &get_verus_target_dir().display().to_string(),
-    ]);
-
-    if !target.gen_lifetime {
-        cmd.arg("--no-lifetime");
-    }
-
-    // output options
-    cmd.arg("--compile")
-        .arg("--export")
-        .arg(target.library_proof());
-
-    // imported dependencies
-    deps.extend(extra_imports.clone());
-    let all_imports = deps.values().collect::<Vec<_>>();
-    check_imports_compiled(all_imports.as_slice())?;
-    cmd_push_import(cmd, all_imports.as_slice());
-
-    // import external crates
-    let externs = get_remote_dependency(target, options.release);
-    check_externs(&externs).unwrap_or_else(|e| {
-        error!("Error during verification: {}", e);
-    });
-    cmd_push_externs(cmd, &externs);
-
-    // extra options
-    if options.log {
-        cmd.arg("--log-all");
-    }
-
-    if options.trace {
-        cmd.env("RUST_BACKTRACE", "full");
-        cmd.arg("--trace");
-    }
-
-    if options.release {
-        cmd.args(["-C", "opt-level=2"]);
-    } else {
-        cmd.args(["-C", "opt-level=0"]);
-    }
-
-    // input file
-    let target_file = target.root_file();
-    let crate_type = target.crate_type();
-    cmd.arg(target_file)
-        .arg(format!("--crate-type={}", crate_type))
-        .arg("--expand-errors")
-        .arg(format!("--multiple-errors={}", options.max_errors))
-        .arg("-o")
-        .arg(target.library_path())
-        .arg("-V")
-        .arg("use-crate-name")
-        .args(&options.pass_through)
-        .arg("--")
-        .arg("-C")
-        .arg(format!("metadata={}", target.name));
-
-    for feature in target.features.iter() {
-        cmd.args(["--cfg", &format!("feature=\"{}\"", feature)]);
-    }
-    cmd.stdout(Stdio::inherit());
-
-    info!(
-        "  {} {} {}",
-        "Verifying (and compiling)".bold().green(),
-        target.name.white(),
-        target.version.white()
-    );
-    debug!(">> {:?}", cmd);
-
-    // run the command
-    let status = cmd.status().unwrap_or_else(|e| {
-        error!("Error during compilation: {}", e);
-    });
-
-    if status.success() {
-        // duration
-        let duration = ts_start.elapsed();
-        info!(
-            "  {} {} {} in {:.2}s",
-            "Verified".bold().green(),
-            target.name.white(),
-            target.version.white(),
-            duration.as_secs_f64()
-        );
-
-        // success
-        target.save_library_proof_timestamp(&verus_targets());
-
-        // disassemble the output
-        if options.disasm {
-            disassemble(target).unwrap_or_else(|e| {
-                error!("Error during disassembly: {}", e);
-            });
+    let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
+        let ts_start = Instant::now();
+        let cmd = &mut Command::new(get_cargo_verus(options.release));
+        cmd.env("RUSTC_BOOTSTRAP", "1")
+            .env("VERUS_Z3_PATH", &z3)
+            .arg(if options.focus { "focus" } else { "verify" });
+        if !options.focus && verus_args_should_apply_to_roots_only(&options.pass_through) {
+            cmd.arg("--fwd-verus-args-to").arg("roots");
         }
+        if let Some(target) = target {
+            cmd.arg("-p").arg(&target.name);
+        }
+        cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
 
+        let mut verus_args = Vec::new();
         if options.log {
-            move_verus_log_files(&target.name);
-        }
-
-        return Ok(());
-    }
-
-    // failure
-    Err(format!("Error during compilation: `{}`", target.name,).into())
-}
-
-/// Recursively compile a target and all its dependencies in the correct order.
-///
-/// This function handles the recursive compilation of a target and its dependencies,
-/// ensuring proper topological ordering. It ensures that all dependencies of a target
-/// are compiled before the target itself. It also maintains a set of already-compiled
-/// targets to avoid redundant compilation.
-///
-/// # Arguments
-///
-/// * `target` - The target to compile along with its dependencies
-/// * `compiled` - Set tracking already-compiled target names (modified in-place)
-/// * `scope_targets` - Map of targets allowed to be compiled (acts as a scope limiter).
-///   Only targets in this map will actually be compiled, even if they're in dependencies.
-/// * `options` - Extra compilation options
-///
-/// # Behavior
-///
-/// 1. Returns early if the target is already in the `compiled` set
-/// 2. Recursively compiles all dependencies that are in `extended_targets`
-/// 3. Compiles the target itself if it's in `extended_targets`
-/// 4. Marks the target as compiled to prevent duplicate work
-pub fn compile_target_with_dependencies(
-    target: &VerusTarget,
-    compiled: &mut std::collections::HashSet<String>,
-    scope_targets: &IndexMap<String, VerusTarget>,
-    options: &ExtraOptions,
-) {
-    let all_targets = verus_targets();
-
-    if compiled.contains(&target.name) {
-        return;
-    }
-
-    // First compile all dependencies that exist in scope
-    for dep in &target.dependencies {
-        if scope_targets.contains_key(&dep.name) {
-            if let Some(dep_target) = all_targets.get(&dep.name) {
-                compile_target_with_dependencies(dep_target, compiled, scope_targets, options);
-            }
-        }
-    }
-
-    // Then compile this target if it's in scope
-    if scope_targets.contains_key(&target.name) {
-        let target_options = options.for_dependency();
-        compile_single_target(target, &vec![], &target_options).unwrap_or_else(|e| {
-            error!(
-                "Unable to build the dependent proof: `{}` ({})",
-                target.name, e
-            );
-        });
-        compiled.insert(target.name.clone());
-    }
-}
-
-pub fn exec_verify(
-    targets: &[VerusTarget],
-    imports: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
-    let verus = get_verus(options.release);
-    let z3 = get_z3();
-    let extra_imports = imports
-        .iter()
-        .map(|target| (target.name.clone(), target.clone()))
-        .collect::<IndexMap<_, _>>();
-    let out_dir = get_target_dir();
-    if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            error!("Error creating target directory: {}", e);
-        });
-    }
-    let deps_dir = out_dir.join(get_build_dir(options.release)).join("deps");
-
-    let extended_targets = get_dependent_targets_batch(targets, options.release);
-
-    let mut compiled = std::collections::HashSet::new();
-    let all_targets = verus_targets();
-
-    // Process each dependency in extended_targets
-    for target_name in extended_targets.keys() {
-        if let Some(target) = all_targets.get(target_name) {
-            compile_target_with_dependencies(target, &mut compiled, &extended_targets, options);
-        }
-    }
-
-    let ts_start = Instant::now();
-    // remove the targets that has been compiled
-    let remaining_targets = targets
-        .iter()
-        .filter(|target| {
-            let name = target.name.replace('-', "_");
-            !extended_targets.contains_key(&name)
-        })
-        .collect::<Vec<_>>();
-
-    for target in remaining_targets.iter() {
-        prepare(target, options.release);
-
-        let cmd = &mut Command::new(&verus);
-
-        // setup the environment
-        cmd.env("VERUS_PATH", &verus).env("VERUS_Z3_PATH", &z3);
-
-        cmd.args([
-            "-L",
-            &format!("dependency={}", deps_dir.display()),
-            "-L",
-            &get_verus_target_dir().display().to_string(),
-        ]);
-
-        if !target.gen_lifetime {
-            cmd.arg("--no-lifetime");
-        }
-
-        // imported dependencies
-        let deps = &mut get_local_dependency(target);
-        deps.extend(extra_imports.clone());
-        let all_imports = deps.values().collect::<Vec<_>>();
-
-        // Check and compile missing imports
-        let mut missing_targets = Vec::new();
-        for imp in all_imports.iter() {
-            if !imp.library_proof().exists() || !imp.library_path().exists() {
-                missing_targets.push((*imp).clone());
-            }
-        }
-
-        if !missing_targets.is_empty() {
-            info!(
-                "Missing verification files for dependencies: {:?}",
-                missing_targets.iter().map(|t| &t.name).collect::<Vec<_>>()
-            );
-            info!("Automatically compiling missing dependencies...");
-
-            let mut compiled = std::collections::HashSet::new();
-            let missing_targets_map: IndexMap<String, VerusTarget> = missing_targets
-                .iter()
-                .map(|t| (t.name.clone(), t.clone()))
-                .collect();
-
-            for target_item in &missing_targets {
-                compile_target_with_dependencies(
-                    target_item,
-                    &mut compiled,
-                    &missing_targets_map,
-                    options,
-                );
-            }
-        }
-
-        check_imports_compiled(all_imports.as_slice()).unwrap_or_else(|e| {
-            error!("Error during verification: {}", e);
-        });
-        cmd_push_import(cmd, all_imports.as_slice());
-
-        // import external crates
-        let externs = get_remote_dependency(target, options.release);
-        check_externs(&externs).unwrap_or_else(|e| {
-            error!("Error during verification: {}", e);
-        });
-        cmd_push_externs(cmd, &externs);
-
-        // extra options
-        if options.log {
-            cmd.arg("--log-all");
+            verus_args.push("--log-all".to_string());
         }
         if options.trace {
             cmd.env("RUST_BACKTRACE", "full");
-            cmd.arg("--trace");
+            verus_args.push("--trace".to_string());
         }
         if options.count_line {
-            cmd.arg("--emit=dep-info");
+            verus_args.push("--emit=dep-info".to_string());
         }
-
-        // input file
-        let target_file = target.root_file();
-        let crate_type = target.crate_type();
-        cmd.arg(target_file)
-            .arg(format!("--crate-type={}", crate_type))
-            .arg("--expand-errors")
-            .arg(format!("--multiple-errors={}", options.max_errors))
-            .args(&options.pass_through)
-            .arg("--")
-            .arg("-C")
-            .arg(format!("metadata={}", target.name));
-
-        for feature in target.features.iter() {
-            cmd.args(["--cfg", &format!("feature=\"{}\"", feature)]);
+        verus_args.push(format!("--multiple-errors={}", options.max_errors));
+        verus_args.extend(options.pass_through.clone());
+        if !verus_args.is_empty() {
+            cmd.arg("--").args(verus_args);
         }
-        cmd.stdout(Stdio::inherit());
 
         info!(
             "  {} {} {}",
             "Verifying".bold().green(),
-            target.name.white(),
-            target.version.white()
+            target
+                .map(|t| t.name.as_str())
+                .unwrap_or("workspace")
+                .white(),
+            target.map(|t| t.version.as_str()).unwrap_or("").white()
         );
         debug!(">> {:?}", cmd);
 
-        // run the command
-        let status = cmd.status().unwrap_or_else(|e| {
+        let status = run_filtered_command(cmd).unwrap_or_else(|e| {
             error!("Error during verification: {}", e);
         });
 
@@ -1273,23 +676,31 @@ pub fn exec_verify(
             info!(
                 "  {} {} {} in {:.2}s",
                 "Verified".bold().green(),
-                target.name.white(),
-                target.version.white(),
+                target
+                    .map(|t| t.name.as_str())
+                    .unwrap_or("workspace")
+                    .white(),
+                target.map(|t| t.version.as_str()).unwrap_or("").white(),
                 duration.as_secs_f64()
             );
 
-            if options.log {
+            if options.log && target.is_some() {
+                let target = target.unwrap();
                 move_verus_log_files(&target.name);
             }
         } else {
-            error!("Verification failed for target {}", target.name);
+            error!(
+                "Verification failed for {}",
+                target.map(|t| t.name.as_str()).unwrap_or("workspace")
+            );
         }
 
         if options.count_line {
             let verus_root = install::verus_dir();
             let line_count_dir = verus_root.join("source/tools/line_count");
-            let dependency_file = env::current_dir()?.join("lib.d");
-            env::set_current_dir(&line_count_dir)?;
+            let current_dir = std::env::current_dir()?;
+            let dependency_file = current_dir.join("lib.d");
+            std::env::set_current_dir(&line_count_dir)?;
             let mut cargo_cmd = Command::new("cargo");
             cargo_cmd
                 .arg("run")
@@ -1297,12 +708,142 @@ pub fn exec_verify(
                 .arg(&dependency_file)
                 .arg("-p");
 
-            println!("Counting lines for target: {}", target.name);
-            cargo_cmd.status()?;
+            println!(
+                "Counting lines for {}",
+                target.map(|t| t.name.as_str()).unwrap_or("workspace")
+            );
+            let line_count_result = cargo_cmd.status();
+            std::env::set_current_dir(current_dir)?;
+            line_count_result?;
             fs::remove_file(&dependency_file)?;
+        }
+        Ok(())
+    };
+
+    if targets.is_empty() {
+        run(None)?;
+    } else {
+        for target in targets.iter() {
+            run(Some(target))?;
         }
     }
     Ok(())
+}
+
+const VERUS_SPEC_WARNING_START: &str =
+    "warning: #[verus_spec] is likely used inside a verus! block.";
+const VERUS_SPEC_WARNING_END: &str =
+    "= note: this warning originates in the attribute macro `verus_spec`";
+
+pub fn run_filtered_command(cmd: &mut Command) -> std::io::Result<std::process::ExitStatus> {
+    let configured_color = std::env::var_os("CARGO_TERM_COLOR");
+    if should_force_cargo_color(std::io::stderr().is_terminal(), configured_color.as_deref()) {
+        // Piping stderr for filtering would otherwise make Cargo disable the
+        // colors it normally emits to an interactive terminal.
+        cmd.env("CARGO_TERM_COLOR", "always");
+    }
+    cmd.stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    let child_stderr = child.stderr.take().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "could not capture the process stderr",
+        )
+    })?;
+
+    let filter_result =
+        filter_verus_spec_warnings(BufReader::new(child_stderr), &mut std::io::stderr().lock());
+    let status_result = child.wait();
+
+    // If stderr filtering failed (e.g. the writer closed), don't leave the
+    // child process orphaned and running during a long `make` flow.
+    if filter_result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    filter_result?;
+    status_result
+}
+
+fn should_force_cargo_color(stderr_is_terminal: bool, configured: Option<&OsStr>) -> bool {
+    stderr_is_terminal
+        && configured
+            .map(|value| value.eq_ignore_ascii_case("auto"))
+            .unwrap_or(true)
+}
+
+fn filter_verus_spec_warnings<R: BufRead, W: Write>(
+    reader: R,
+    writer: &mut W,
+) -> std::io::Result<()> {
+    let mut candidate = Vec::new();
+    let mut suppress_following_blank_line = false;
+
+    for line in reader.lines() {
+        let line = line?;
+        let plain_line = strip_ansi_escape_codes(&line);
+
+        if suppress_following_blank_line {
+            suppress_following_blank_line = false;
+            if plain_line.trim().is_empty() {
+                continue;
+            }
+        }
+
+        if !candidate.is_empty() {
+            let is_warning_end = plain_line.contains(VERUS_SPEC_WARNING_END);
+            candidate.push(line);
+            if is_warning_end {
+                candidate.clear();
+                suppress_following_blank_line = true;
+            }
+            continue;
+        }
+
+        if plain_line.contains(VERUS_SPEC_WARNING_START) {
+            candidate.push(line);
+        } else {
+            writeln!(writer, "{line}")?;
+        }
+    }
+
+    // A truncated or changed diagnostic is not a confirmed match. Preserve it
+    // instead of accidentally hiding unrelated compiler output.
+    for line in candidate {
+        writeln!(writer, "{line}")?;
+    }
+    writer.flush()
+}
+
+fn strip_ansi_escape_codes(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.next_if_eq(&'[').is_some() {
+            for code in chars.by_ref() {
+                if ('@'..='~').contains(&code) {
+                    break;
+                }
+            }
+        } else {
+            plain.push(ch);
+        }
+    }
+
+    plain
+}
+
+fn verus_args_should_apply_to_roots_only(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--verify-root" | "--verify-module" | "--verify-only-module" | "--verify-function"
+        ) || arg.starts_with("--verify-module=")
+            || arg.starts_with("--verify-only-module=")
+            || arg.starts_with("--verify-function=")
+    })
 }
 
 pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
@@ -1337,104 +878,87 @@ pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     Ok(())
 }
 
-pub fn exec_compile(
-    targets: &[VerusTarget],
-    imports: &[VerusTarget],
-    options: &ExtraOptions,
-) -> Result<(), DynError> {
-    let out_dir = get_target_dir();
-    if !out_dir.exists() {
-        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-            error!("Error creating target directory: {}", e);
-        });
-    }
-
-    let extended_targets = get_dependent_targets_batch(targets, options.release);
-    let mut compiled = std::collections::HashSet::new();
-    let all_targets = verus_targets();
-
-    // Process each dependency in extended_targets
-    for target_name in extended_targets.keys() {
-        if let Some(target) = all_targets.get(target_name) {
-            compile_target_with_dependencies(target, &mut compiled, &extended_targets, options);
+pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
+    let z3 = get_z3();
+    let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
+        let cmd = &mut Command::new(get_cargo_verus(options.release));
+        cmd.env("RUSTC_BOOTSTRAP", "1")
+            .env("VERUS_Z3_PATH", &z3)
+            .arg("build");
+        if verus_args_should_apply_to_roots_only(&options.pass_through) {
+            cmd.arg("--fwd-verus-args-to").arg("roots");
         }
-    }
+        if let Some(target) = target {
+            cmd.arg("-p").arg(&target.name);
+        }
+        if options.release {
+            cmd.arg("--release");
+        }
+        cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
 
-    // remove the targets that has been compiled
-    let remaining_targets = targets
-        .iter()
-        .filter(|target| {
-            let name = target.name.replace('-', "_");
-            !extended_targets.contains_key(&name)
-        })
-        .collect::<Vec<_>>();
+        let mut verus_args = Vec::new();
+        if options.log {
+            verus_args.push("--log-all".to_string());
+        }
+        if options.trace {
+            cmd.env("RUST_BACKTRACE", "full");
+            verus_args.push("--trace".to_string());
+        }
+        verus_args.push(format!("--multiple-errors={}", options.max_errors));
+        verus_args.extend(options.pass_through.clone());
+        if !verus_args.is_empty() {
+            cmd.arg("--").args(verus_args);
+        }
 
-    for target in remaining_targets.iter() {
-        compile_single_target(target, imports, options)?;
+        let target_name = target
+            .map(|target| target.name.as_str())
+            .unwrap_or("workspace");
+        let target_version = target.map(|target| target.version.as_str()).unwrap_or("");
+
+        info!(
+            "  {} {} {}",
+            "Building".bold().green(),
+            target_name.white(),
+            target_version.white()
+        );
+        debug!(">> {:?}", cmd);
+
+        let status = run_filtered_command(cmd).unwrap_or_else(|e| {
+            error!("Error during build: {}", e);
+        });
+
+        if status.success() {
+            info!(
+                "  {} {} {}",
+                "Built".bold().green(),
+                target_name.white(),
+                target_version.white()
+            );
+        } else {
+            error!("Build failed for target {}", target_name);
+        }
+
+        Ok(())
+    };
+
+    if targets.is_empty() {
+        run(None)?;
+    } else {
+        for target in targets.iter() {
+            run(Some(target))?;
+        }
     }
 
     Ok(())
 }
 
-/// Clean build artefacts produced by `exec_compile`.
-pub fn exec_clean(targets: &[VerusTarget], all: bool) -> Result<(), DynError> {
-    let out_dir = get_target_dir();
-
-    let to_clean: Vec<VerusTarget> = if all || targets.is_empty() {
-        // clean all known targets
-        verus_targets().values().cloned().collect()
+pub fn exec_clean() -> Result<(), DynError> {
+    let status = Command::new("cargo").arg("clean").status()?;
+    if status.success() {
+        Ok(())
     } else {
-        targets.iter().cloned().collect()
-    };
-
-    for target in to_clean.iter() {
-        // remove .verusdata
-        let proof = target.library_proof();
-        if proof.exists() {
-            info!("Removing {}", proof.display());
-            std::fs::remove_file(&proof).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", proof.display(), e);
-            });
-        }
-
-        // remove .verusdata.timestamp
-        let proof_ts = target.library_proof_timestamp();
-        if proof_ts.exists() {
-            info!("Removing {}", proof_ts.display());
-            std::fs::remove_file(&proof_ts).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", proof_ts.display(), e);
-            });
-        }
-
-        // remove lib{name}.rlib
-        let lib = target.library_path();
-        if lib.exists() {
-            info!("Removing {}", lib.display());
-            std::fs::remove_file(&lib).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", lib.display(), e);
-            });
-        }
-
-        // remove generated extern_crates
-        let extern_crates_path = out_dir.join(format!("{}.extern_crates.rs", target.name));
-        if extern_crates_path.exists() {
-            info!("Removing {}", extern_crates_path.display());
-            std::fs::remove_file(&extern_crates_path).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", extern_crates_path.display(), e);
-            });
-        }
-
-        // remove deps.toml
-        let deps_toml_path = out_dir.join(format!("{}.deps.toml", target.name));
-        if deps_toml_path.exists() {
-            info!("Removing {}", deps_toml_path.display());
-            std::fs::remove_file(&deps_toml_path).unwrap_or_else(|e| {
-                warn!("Failed to remove {}: {}", deps_toml_path.display(), e);
-            });
-        }
+        Err("cargo clean failed".into())
     }
-
-    Ok(())
 }
 
 pub mod install {
@@ -1604,16 +1128,40 @@ pub mod install {
         };
 
         let branch_name = branch.unwrap_or("main");
+        let clone_dir_existed = verus_dir.exists();
+        let cleanup_failed_clone = || -> Result<(), DynError> {
+            if !clone_dir_existed && verus_dir.exists() {
+                std::fs::remove_dir_all(verus_dir).map_err(|e| {
+                    format!(
+                        "Failed to clean up incomplete clone at {}: {}",
+                        verus_dir.display(),
+                        e
+                    )
+                })?;
+            }
+            Ok(())
+        };
 
         info!(
             "Cloning Verus repo from {} (branch: {}) to {} ...",
-            repo_ssh,
+            repo_https,
             branch_name,
             verus_dir.display()
         );
 
         let mut builder = git2::build::RepoBuilder::new();
         builder.branch(branch_name);
+
+        let https_error = match builder.clone(repo_https, verus_dir) {
+            Ok(_) => return Ok(()),
+            Err(e) => e,
+        };
+        cleanup_failed_clone()?;
+
+        info!("HTTPS failed, trying SSH: {}", repo_ssh);
+
+        let mut builder_ssh = git2::build::RepoBuilder::new();
+        builder_ssh.branch(branch_name);
 
         let mut callbacks = git2::RemoteCallbacks::new();
 
@@ -1623,22 +1171,18 @@ pub mod install {
 
         let mut fetch_opts = git2::FetchOptions::new();
         fetch_opts.remote_callbacks(callbacks);
-        builder.fetch_options(fetch_opts);
+        builder_ssh.fetch_options(fetch_opts);
+        let ssh_error = match builder_ssh.clone(repo_ssh, verus_dir) {
+            Ok(_) => return Ok(()),
+            Err(e) => e,
+        };
+        cleanup_failed_clone()?;
 
-        let ssh_result = builder.clone(repo_ssh, verus_dir);
-        if ssh_result.is_ok() {
-            return Ok(());
-        }
-
-        info!("SSH failed, trying HTTPS: {}", repo_https);
-
-        let mut builder_https = git2::build::RepoBuilder::new();
-        builder_https.branch(branch_name);
-        builder_https
-            .clone(repo_https, verus_dir)
-            .map_err(|e| format!("Failed to clone verus repo: {}", e))?;
-
-        Ok(())
+        Err(format!(
+            "Failed to clone Verus repo via HTTPS ({}) or SSH ({})",
+            https_error, ssh_error
+        )
+        .into())
     }
 
     #[cfg(target_os = "windows")]
@@ -1721,81 +1265,75 @@ pub mod install {
         Ok(())
     }
 
-    fn verus_build_args(release: bool, extra_args: &[String]) -> Vec<String> {
-        let mut args = Vec::new();
+    fn vstd_build_args(release: bool, extra_args: &[String]) -> Vec<String> {
+        let mut args = vec![
+            "-p".to_string(),
+            "cargo-verus".to_string(),
+            "--".to_string(),
+            "build".to_string(),
+        ];
         if release {
             args.push("--release".to_string());
         }
-        args.extend(extra_args.iter().cloned());
-        args.push("--features".to_string());
-        args.push("singular".to_string());
+        args.extend(["--manifest-path".to_string(), "vstd/Cargo.toml".to_string()]);
+
+        for arg in extra_args {
+            if arg == "--vstd-weak-memory" {
+                args.extend(["--features".to_string(), "weak-memory".to_string()]);
+            } else {
+                args.push(arg.clone());
+            }
+        }
         args
     }
 
-    fn run_build_command(cmd: &mut Command, description: &str) -> Result<(), DynError> {
-        debug!("{:?}", cmd);
-        let status = cmd.status()?;
-        if !status.success() {
-            return Err(format!("{} failed with status {}", description, status).into());
-        }
-        Ok(())
-    }
-
-    #[cfg(target_os = "windows")]
-    fn powershell_quote(arg: &str) -> String {
-        format!("'{}'", arg.replace('\'', "''"))
-    }
-
-    #[cfg(target_os = "windows")]
-    pub fn build_verus(release: bool, extra_args: &[String]) -> Result<(), DynError> {
-        let build_args = verus_build_args(release, extra_args);
-        let quoted_args = build_args
-            .iter()
-            .map(|arg| powershell_quote(arg))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut cmd = executable::get_powershell_command()?;
-        cmd.current_dir(verus_source_dir()).arg("/c").arg(format!(
-            "& '..\\tools\\activate.ps1'; vargo build {}",
-            quoted_args
-        ));
-        run_build_command(&mut cmd, "Verus build")?;
-
-        let mut verusdoc_cmd = executable::get_powershell_command()?;
-        verusdoc_cmd
-            .current_dir(verus_source_dir())
-            .arg("/c")
-            .arg("& '..\\tools\\activate.ps1'; vargo build -p verusdoc");
-        run_build_command(&mut verusdoc_cmd, "Verusdoc build")?;
-
-        status!("Verus build complete");
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "windows"))]
     pub fn build_verus(release: bool, extra_args: &[String]) -> Result<(), DynError> {
         let toolchain = verus_dir().join("rust-toolchain.toml");
         let toolchain_name = toolchain::load_toolchain(&toolchain);
-        let build_args = verus_build_args(release, extra_args);
+        let source_dir = verus_source_dir();
 
-        let cmd = &mut Command::new("bash");
-        cmd.current_dir(verus_source_dir())
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .env("RUSTUP_TOOLCHAIN", toolchain_name.clone())
-            .arg("-c")
-            .arg("source ../tools/activate; vargo build \"$@\"")
-            .arg("vargo-build")
-            .args(&build_args);
-        run_build_command(cmd, "Verus build")?;
+        let cargo = |subcommand: &str| {
+            let mut cmd = Command::new("cargo");
+            cmd.current_dir(&source_dir)
+                .env_remove("RUSTUP_TOOLCHAIN")
+                .env("RUSTUP_TOOLCHAIN", &toolchain_name)
+                .arg(subcommand);
+            cmd
+        };
 
-        let verusdoc_cmd = &mut Command::new("bash");
-        verusdoc_cmd
-            .current_dir(verus_source_dir())
-            .env_remove("RUSTUP_TOOLCHAIN")
-            .env("RUSTUP_TOOLCHAIN", toolchain_name)
-            .arg("-c")
-            .arg("source ../tools/activate; vargo build -p verusdoc");
-        run_build_command(verusdoc_cmd, "Verusdoc build")?;
+        let clean_cmd = cargo("clean");
+
+        let mut build_cmd = cargo("build");
+        if release {
+            build_cmd.arg("--release");
+        }
+        build_cmd.args(["--features", "singular"]);
+
+        let mut vstd_cmd = cargo("run");
+        if release {
+            vstd_cmd.arg("--release");
+        }
+        vstd_cmd.args(vstd_build_args(release, extra_args));
+
+        for (mut cmd, description) in [
+            (clean_cmd, "Cleaning the Verus workspace"),
+            (build_cmd, "Building Verus"),
+            (vstd_cmd, "Building vstd"),
+        ] {
+            debug!("{:?}", cmd);
+            let status = cmd.status()?;
+            if !status.success() {
+                return Err(format!("{} failed with {}", description, status).into());
+            }
+        }
+
+        let profile = if release { "release" } else { "debug" };
+        File::create(
+            source_dir
+                .join("target-verus")
+                .join(profile)
+                .join("verus-root"),
+        )?;
 
         status!("Verus build complete");
         Ok(())
@@ -2048,17 +1586,39 @@ pub mod install {
         use super::*;
 
         #[test]
-        fn irc11_build_argument_is_forwarded_to_vargo() {
+        fn irc11_build_argument_enables_weak_memory_for_vstd() {
             let extra_args = vec!["--vstd-weak-memory".to_string()];
             assert_eq!(
-                verus_build_args(true, &extra_args),
-                ["--release", "--vstd-weak-memory", "--features", "singular",]
+                vstd_build_args(true, &extra_args),
+                [
+                    "-p",
+                    "cargo-verus",
+                    "--",
+                    "build",
+                    "--release",
+                    "--manifest-path",
+                    "vstd/Cargo.toml",
+                    "--features",
+                    "weak-memory",
+                ]
             );
         }
 
         #[test]
-        fn debug_build_keeps_existing_singular_feature() {
-            assert_eq!(verus_build_args(false, &[]), ["--features", "singular"]);
+        fn extra_vstd_build_arguments_are_forwarded() {
+            let extra_args = vec!["--locked".to_string()];
+            assert_eq!(
+                vstd_build_args(false, &extra_args),
+                [
+                    "-p",
+                    "cargo-verus",
+                    "--",
+                    "build",
+                    "--manifest-path",
+                    "vstd/Cargo.toml",
+                    "--locked",
+                ]
+            );
         }
     }
 }

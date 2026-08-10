@@ -45,8 +45,6 @@ log = { version = "*" }
 log4rs = { version = "*", features = ["gzip"] }
 walkdir = { version = "*" }
 rayon = { version = "*" }
-blake3 = { version = "*" }
-hex = { version = "*" }
 toml_edit = { version = "*" }
 
 syn = { version = "2", features = ["full", "extra-traits"] }

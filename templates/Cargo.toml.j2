@@ -10,11 +10,8 @@ name = "{{ c.package_name }}"
 path = "src/.dummy.rs"
 # path = "src/lib.rs"
 
-[features]
-verus = []
-verify = ["verus"]
-
 [package.metadata.verus]
+verify = true
 path = "src/lib.rs"
 check_lifetime = false
 
