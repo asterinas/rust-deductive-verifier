@@ -1446,6 +1446,7 @@ pub mod install {
         pub restart: bool,
         pub release: bool,
         pub branch: Option<String>,
+        pub build_args: Vec<String>,
         pub force_reset: bool,
         pub upstream_verus: bool,
     }
@@ -1720,50 +1721,72 @@ pub mod install {
         Ok(())
     }
 
+    fn verus_build_args(release: bool, extra_args: &[String]) -> Vec<String> {
+        let mut args = Vec::new();
+        if release {
+            args.push("--release".to_string());
+        }
+        args.extend(extra_args.iter().cloned());
+        args.push("--features".to_string());
+        args.push("singular".to_string());
+        args
+    }
+
+    fn run_build_command(cmd: &mut Command, description: &str) -> Result<(), DynError> {
+        debug!("{:?}", cmd);
+        let status = cmd.status()?;
+        if !status.success() {
+            return Err(format!("{} failed with status {}", description, status).into());
+        }
+        Ok(())
+    }
+
     #[cfg(target_os = "windows")]
-    pub fn build_verus(release: bool) -> Result<(), DynError> {
+    fn powershell_quote(arg: &str) -> String {
+        format!("'{}'", arg.replace('\'', "''"))
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn build_verus(release: bool, extra_args: &[String]) -> Result<(), DynError> {
+        let build_args = verus_build_args(release, extra_args);
+        let quoted_args = build_args
+            .iter()
+            .map(|arg| powershell_quote(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
         let mut cmd = executable::get_powershell_command()?;
         cmd.current_dir(verus_source_dir()).arg("/c").arg(format!(
-            "& '..\\tools\\activate.ps1'; vargo build {} --features singular",
-            if release { "--release" } else { "" }
+            "& '..\\tools\\activate.ps1'; vargo build {}",
+            quoted_args
         ));
-        debug!("{:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verus: {}", e);
-        });
+        run_build_command(&mut cmd, "Verus build")?;
 
         let mut verusdoc_cmd = executable::get_powershell_command()?;
         verusdoc_cmd
             .current_dir(verus_source_dir())
             .arg("/c")
             .arg("& '..\\tools\\activate.ps1'; vargo build -p verusdoc");
-        debug!("{:?}", verusdoc_cmd);
-        verusdoc_cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verusdoc: {}", e);
-        });
+        run_build_command(&mut verusdoc_cmd, "Verusdoc build")?;
 
         status!("Verus build complete");
         Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]
-    pub fn build_verus(release: bool) -> Result<(), DynError> {
+    pub fn build_verus(release: bool, extra_args: &[String]) -> Result<(), DynError> {
         let toolchain = verus_dir().join("rust-toolchain.toml");
         let toolchain_name = toolchain::load_toolchain(&toolchain);
+        let build_args = verus_build_args(release, extra_args);
 
         let cmd = &mut Command::new("bash");
         cmd.current_dir(verus_source_dir())
             .env_remove("RUSTUP_TOOLCHAIN")
             .env("RUSTUP_TOOLCHAIN", toolchain_name.clone())
             .arg("-c")
-            .arg(format!(
-                "source ../tools/activate; vargo build {} --features singular",
-                if release { "--release" } else { "" }
-            ));
-        debug!("{:?}", cmd);
-        cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verus: {}", e);
-        });
+            .arg("source ../tools/activate; vargo build \"$@\"")
+            .arg("vargo-build")
+            .args(&build_args);
+        run_build_command(cmd, "Verus build")?;
 
         let verusdoc_cmd = &mut Command::new("bash");
         verusdoc_cmd
@@ -1772,10 +1795,7 @@ pub mod install {
             .env("RUSTUP_TOOLCHAIN", toolchain_name)
             .arg("-c")
             .arg("source ../tools/activate; vargo build -p verusdoc");
-        debug!("{:?}", verusdoc_cmd);
-        verusdoc_cmd.status().unwrap_or_else(|e| {
-            error!("Failed to build verusdoc: {}", e);
-        });
+        run_build_command(verusdoc_cmd, "Verusdoc build")?;
 
         status!("Verus build complete");
         Ok(())
@@ -1802,7 +1822,7 @@ pub mod install {
         install_z3()?;
 
         // Build Verus
-        build_verus(options.release)?;
+        build_verus(options.release, &options.build_args)?;
 
         // Update the workspace toolchain
         toolchain::sync_toolchain(
@@ -2008,7 +2028,7 @@ pub mod install {
         status!("Verus repo updated to the latest version");
 
         // Build Verus
-        build_verus(options.release)?;
+        build_verus(options.release, &options.build_args)?;
 
         // Update the workspace toolchain
         toolchain::sync_toolchain(
@@ -2021,5 +2041,24 @@ pub mod install {
 
         status!("Verus upgrade complete");
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn irc11_build_argument_is_forwarded_to_vargo() {
+            let extra_args = vec!["--vstd-weak-memory".to_string()];
+            assert_eq!(
+                verus_build_args(true, &extra_args),
+                ["--release", "--vstd-weak-memory", "--features", "singular",]
+            );
+        }
+
+        #[test]
+        fn debug_build_keeps_existing_singular_feature() {
+            assert_eq!(verus_build_args(false, &[]), ["--features", "singular"]);
+        }
     }
 }

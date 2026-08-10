@@ -124,6 +124,15 @@ struct BootstrapArgs {
         value_name = "BRANCH_NAME"
     )]
     branch: Option<String>,
+
+    #[arg(
+        long = "build-arg",
+        help = "An extra argument passed to `vargo build` when building Verus",
+        value_name = "ARG",
+        action = ArgAction::Append,
+        allow_hyphen_values = true
+    )]
+    build_args: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -470,6 +479,7 @@ fn bootstrap(args: &BootstrapArgs) -> Result<(), DynError> {
         release: !args.debug,
         restart: args.restart,
         branch: args.branch.clone(),
+        build_args: args.build_args.clone(),
         force_reset: args.upgrade,
         upstream_verus: args.upstream_verus,
     };
@@ -591,5 +601,28 @@ fn main() {
         Commands::Clean(args) => clean(args),
     } {
         error!("Error when executing command `{:?}`: {}", cli.command, e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_accepts_irc11_vargo_build_argument() {
+        let cli = Cli::try_parse_from([
+            "dv",
+            "bootstrap",
+            "--branch",
+            "irc11",
+            "--build-arg=--vstd-weak-memory",
+        ])
+        .unwrap();
+
+        let Commands::Bootstrap(args) = cli.command else {
+            panic!("expected bootstrap command");
+        };
+        assert_eq!(args.branch.as_deref(), Some("irc11"));
+        assert_eq!(args.build_args, ["--vstd-weak-memory"]);
     }
 }

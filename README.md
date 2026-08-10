@@ -22,6 +22,26 @@ pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 cargo dv verify --targets <target1> <target2> ...
 ```
 
+## Bootstrapping Verus
+
+By default, `cargo dv bootstrap` builds the `main` branch of
+`asterinas/verus`. Use `--branch` to select another branch and repeat
+`--build-arg` to pass additional arguments to that branch's `vargo build`.
+
+For example, the `irc11` branch requires its weak-memory vstd modules to be
+enabled explicitly:
+
+```bash
+cargo dv bootstrap --branch irc11 --build-arg=--vstd-weak-memory
+```
+
+The same arguments are honored by upgrades:
+
+```bash
+cargo dv bootstrap --upgrade --branch irc11 \
+  --build-arg=--vstd-weak-memory
+```
+
 Optionally, if you want to use the pre-commit hook, you can add the rusty-hook to your project:
 
 ```bash
@@ -37,4 +57,3 @@ pre-commit = "cargo pre-commit"
 [logging]
 verbose = true
 ```
-
