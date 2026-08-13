@@ -4,6 +4,7 @@ use indexmap::IndexMap;
 use memoize::memoize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::env::consts::DLL_SUFFIX;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -328,7 +329,7 @@ impl CargoBuildExterns {
                         .find(|f| f.ends_with(".rmeta"))
                         .or_else(|| files.iter().find(|f| f.ends_with(".rlib")))
                         .or_else(|| files.iter().find(|f| f.ends_with(".cdylib")))
-                        .or_else(|| files.iter().find(|f| f.ends_with(".so")))
+                        .or_else(|| files.iter().find(|f| f.ends_with(DLL_SUFFIX)))
                         .unwrap_or(&files[0])
                         .to_string();
                     let dep = DependentLibrary {
