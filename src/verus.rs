@@ -36,13 +36,6 @@ pub const Z3_HINT: &str = "tools/verus/source";
 
 pub const VERUSFMT_BIN: &str = "verusfmt";
 
-#[cfg(target_os = "windows")]
-pub const DYN_LIB: &str = ".dll";
-#[cfg(target_os = "linux")]
-pub const DYN_LIB: &str = ".so";
-#[cfg(target_os = "macos")]
-pub const DYN_LIB: &str = ".dylib";
-
 pub const RUSTDOC_BIN: &str = "rustdoc";
 
 pub const VERUSDOC_BIN: &str = "verusdoc";

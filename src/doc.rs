@@ -3,6 +3,7 @@ use cargo_metadata::MetadataCommand;
 use colored::Colorize;
 use indexmap::IndexMap;
 use std::collections::HashSet;
+use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -111,15 +112,16 @@ fn generate_single_target_doc(
 
     // Add extern dependencies for verus_builtin_macros (proc-macro -> host triple)
     let builtin_macros_path =
-        verus_target_dir.join(format!("verus_builtin_macros{}", verus::DYN_LIB));
+        verus_target_dir.join(format!("{DLL_PREFIX}verus_builtin_macros{DLL_SUFFIX}"));
     cmd.arg("--extern").arg(format!(
         "verus_builtin_macros={}",
         builtin_macros_path.display()
     ));
 
     // Add extern dependencies for verus_state_machines_macros
-    let state_machine_macros_path =
-        verus_target_dir.join(format!("verus_state_machines_macros{}", verus::DYN_LIB));
+    let state_machine_macros_path = verus_target_dir.join(format!(
+        "{DLL_PREFIX}verus_state_machines_macros{DLL_SUFFIX}"
+    ));
     cmd.arg("--extern").arg(format!(
         "verus_state_machines_macros={}",
         state_machine_macros_path.display()
