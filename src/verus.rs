@@ -191,8 +191,10 @@ pub struct ExtraOptions {
     pub max_errors: usize,
     /// needs to disassemble the output
     pub disasm: bool,
-    /// pass-through options to the verifier
-    pub pass_through: Vec<String>,
+    /// feature options passed to cargo-verus before the verifier separator
+    pub cargo_args: Vec<String>,
+    /// pass-through options to the Verus verifier
+    pub verus_args: Vec<String>,
     /// count lines of code
     pub count_line: bool,
     /// use cargo-verus focus instead of cargo-verus verify
@@ -623,7 +625,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         cmd.env("RUSTC_BOOTSTRAP", "1")
             .env("VERUS_Z3_PATH", &z3)
             .arg(if options.focus { "focus" } else { "verify" });
-        if !options.focus && verus_args_should_apply_to_roots_only(&options.pass_through) {
+        if !options.focus && verus_args_should_apply_to_roots_only(&options.verus_args) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
         }
         if let Some(target) = target {
@@ -643,10 +645,8 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
             verus_args.push("--emit=dep-info".to_string());
         }
         verus_args.push(format!("--multiple-errors={}", options.max_errors));
-        verus_args.extend(options.pass_through.clone());
-        if !verus_args.is_empty() {
-            cmd.arg("--").args(verus_args);
-        }
+        verus_args.extend(options.verus_args.clone());
+        push_cargo_and_verus_args(cmd, &options.cargo_args, &verus_args);
 
         info!(
             "  {} {} {}",
@@ -839,6 +839,13 @@ fn verus_args_should_apply_to_roots_only(args: &[String]) -> bool {
     })
 }
 
+fn push_cargo_and_verus_args(cmd: &mut Command, cargo_args: &[String], verus_args: &[String]) {
+    cmd.args(cargo_args);
+    if !verus_args.is_empty() {
+        cmd.arg("--").args(verus_args);
+    }
+}
+
 pub fn disassemble(target: &VerusTarget) -> Result<(), DynError> {
     let objdump = commands::get_objdump();
     let cmd = &mut Command::new(&objdump);
@@ -878,7 +885,7 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
         cmd.env("RUSTC_BOOTSTRAP", "1")
             .env("VERUS_Z3_PATH", &z3)
             .arg("build");
-        if verus_args_should_apply_to_roots_only(&options.pass_through) {
+        if verus_args_should_apply_to_roots_only(&options.verus_args) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
         }
         if let Some(target) = target {
@@ -898,10 +905,8 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
             verus_args.push("--trace".to_string());
         }
         verus_args.push(format!("--multiple-errors={}", options.max_errors));
-        verus_args.extend(options.pass_through.clone());
-        if !verus_args.is_empty() {
-            cmd.arg("--").args(verus_args);
-        }
+        verus_args.extend(options.verus_args.clone());
+        push_cargo_and_verus_args(cmd, &options.cargo_args, &verus_args);
 
         let target_name = target
             .map(|target| target.name.as_str())
@@ -951,6 +956,41 @@ pub fn exec_clean() -> Result<(), DynError> {
         Ok(())
     } else {
         Err("cargo clean failed".into())
+    }
+}
+
+#[cfg(test)]
+mod argument_tests {
+    use super::*;
+
+    #[test]
+    fn cargo_features_precede_the_verus_separator() {
+        let mut cmd = Command::new("cargo-verus");
+        cmd.arg("verify");
+        push_cargo_and_verus_args(
+            &mut cmd,
+            &["--features".to_string(), "irc11".to_string()],
+            &[
+                "--multiple-errors=5".to_string(),
+                "--verify-only-module=sync::rcu".to_string(),
+            ],
+        );
+
+        let args = cmd
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "verify",
+                "--features",
+                "irc11",
+                "--",
+                "--multiple-errors=5",
+                "--verify-only-module=sync::rcu",
+            ]
+        );
     }
 }
 

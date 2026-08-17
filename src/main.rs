@@ -188,13 +188,6 @@ struct VerifyArgs {
     focus: bool,
 
     #[arg(
-        last = true,
-        help = "Pass-through arguments to the Verus verifier",
-        allow_hyphen_values = true
-    )]
-    pass_through: Vec<String>,
-
-    #[arg(
         short = 'c',
         long = "count-line",
         help = "Count the number of lines of code",
@@ -202,6 +195,18 @@ struct VerifyArgs {
         action = ArgAction::SetTrue
     )]
     count_line: bool,
+
+    #[command(flatten, next_help_heading = "Cargo feature options")]
+    cargo_features: clap_cargo::Features,
+
+    #[arg(
+        last = true,
+        value_name = "VERUS_ARGS",
+        help = "Arguments passed to the Verus verifier after `--`",
+        help_heading = "Verus options",
+        allow_hyphen_values = true
+    )]
+    verus_args: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -298,12 +303,17 @@ struct BuildArgs {
         action = ArgAction::SetTrue)]
     disasm: bool,
 
+    #[command(flatten, next_help_heading = "Cargo feature options")]
+    cargo_features: clap_cargo::Features,
+
     #[arg(
         last = true,
-        help = "Pass-through arguments to the Verus verifier",
+        value_name = "VERUS_ARGS",
+        help = "Arguments passed to the Verus verifier after `--`",
+        help_heading = "Verus options",
         allow_hyphen_values = true
     )]
-    pass_through: Vec<String>,
+    verus_args: Vec<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -412,6 +422,21 @@ struct FmtArgs {
     paths: Vec<PathBuf>,
 }
 
+fn cargo_feature_args(features: &clap_cargo::Features) -> Vec<String> {
+    let mut args = Vec::new();
+    if features.all_features {
+        args.push("--all-features".to_string());
+    }
+    if features.no_default_features {
+        args.push("--no-default-features".to_string());
+    }
+    if !features.features.is_empty() {
+        args.push("--features".to_string());
+        args.push(features.features.join(" "));
+    }
+    args
+}
+
 fn verify(args: &VerifyArgs) -> Result<(), DynError> {
     let targets = args.targets.clone();
     let options = verus::ExtraOptions {
@@ -420,7 +445,8 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         release: !args.debug,
         trace: args.trace,
         disasm: false,
-        pass_through: args.pass_through.clone(),
+        cargo_args: cargo_feature_args(&args.cargo_features),
+        verus_args: args.verus_args.clone(),
         count_line: args.count_line,
         focus: args.focus,
     };
@@ -462,7 +488,8 @@ fn build(args: &BuildArgs) -> Result<(), DynError> {
         trace: args.trace,
         release: !args.debug,
         disasm: args.disasm,
-        pass_through: args.pass_through.clone(),
+        cargo_args: cargo_feature_args(&args.cargo_features),
+        verus_args: args.verus_args.clone(),
         count_line: false,
         focus: false,
     };
@@ -554,6 +581,44 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verify_separates_cargo_features_from_verus_arguments() {
+        let cli = Cli::try_parse_from([
+            "dv",
+            "verify",
+            "--features",
+            "irc11 alloc",
+            "--no-default-features",
+            "--",
+            "--verify-only-module",
+            "sync::rcu",
+        ])
+        .unwrap();
+
+        let Commands::Verify(args) = cli.command else {
+            panic!("expected verify command");
+        };
+        assert_eq!(args.cargo_features.features, ["irc11", "alloc"]);
+        assert!(args.cargo_features.no_default_features);
+        assert_eq!(
+            cargo_feature_args(&args.cargo_features),
+            ["--no-default-features", "--features", "irc11 alloc"]
+        );
+        assert_eq!(args.verus_args, ["--verify-only-module", "sync::rcu"]);
+    }
+
+    #[test]
+    fn build_accepts_all_features() {
+        let cli = Cli::try_parse_from(["dv", "build", "--all-features"]).unwrap();
+
+        let Commands::Build(args) = cli.command else {
+            panic!("expected build command");
+        };
+        assert!(args.cargo_features.all_features);
+        assert_eq!(cargo_feature_args(&args.cargo_features), ["--all-features"]);
+        assert!(args.verus_args.is_empty());
+    }
 
     #[test]
     fn bootstrap_accepts_upstream_irc11_build_argument() {

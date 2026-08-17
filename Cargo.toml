@@ -24,6 +24,7 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { version = "4.5.35", features = ["derive"] }
+clap-cargo = "0.18.3"
 cargo_metadata = { version = "*" }
 memoize = { version = "*" }
 colored = { version = "*" }

@@ -29,6 +29,21 @@ pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 cargo dv verify --targets <target1> <target2> ...
 ```
 
+### Cargo features and Verus arguments
+
+The `verify` and `build` commands accept Cargo's standard feature options:
+`-F`/`--features`, `--all-features`, and `--no-default-features`. DV forwards
+these options to `cargo-verus` before the verifier argument separator. Arguments
+after `--` continue to be passed directly to Verus.
+
+For example, this enables the `irc11` Cargo feature while asking Verus to check
+only one module:
+
+```bash
+cargo dv verify --targets ostd --features irc11 -- \
+  --verify-only-module sync::rcu
+```
+
 ## Bootstrapping Verus
 
 By default, `cargo dv bootstrap` builds the `main` branch of
