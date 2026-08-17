@@ -628,10 +628,12 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         if !options.focus && verus_args_should_apply_to_roots_only(&options.verus_args) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
         }
-        if let Some(target) = target {
-            cmd.arg("-p").arg(&target.name);
-        }
-        cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
+        push_cargo_args(
+            cmd,
+            target.map(|target| target.name.as_str()),
+            &options.cargo_args,
+            false,
+        );
 
         let mut verus_args = Vec::new();
         if options.log {
@@ -646,7 +648,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         }
         verus_args.push(format!("--multiple-errors={}", options.max_errors));
         verus_args.extend(options.verus_args.clone());
-        push_cargo_and_verus_args(cmd, &options.cargo_args, &verus_args);
+        push_verus_args(cmd, &verus_args);
 
         info!(
             "  {} {} {}",
@@ -839,8 +841,20 @@ fn verus_args_should_apply_to_roots_only(args: &[String]) -> bool {
     })
 }
 
-fn push_cargo_and_verus_args(cmd: &mut Command, cargo_args: &[String], verus_args: &[String]) {
+fn push_cargo_args(cmd: &mut Command, package: Option<&str>, cargo_args: &[String], release: bool) {
+    if let Some(package) = package {
+        cmd.arg("-p").arg(package);
+    }
+    // cargo-verus stops recognizing Verus-relevant Cargo options after options
+    // such as --release and --target, so features must be inserted first.
     cmd.args(cargo_args);
+    if release {
+        cmd.arg("--release");
+    }
+    cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
+}
+
+fn push_verus_args(cmd: &mut Command, verus_args: &[String]) {
     if !verus_args.is_empty() {
         cmd.arg("--").args(verus_args);
     }
@@ -888,13 +902,12 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
         if verus_args_should_apply_to_roots_only(&options.verus_args) {
             cmd.arg("--fwd-verus-args-to").arg("roots");
         }
-        if let Some(target) = target {
-            cmd.arg("-p").arg(&target.name);
-        }
-        if options.release {
-            cmd.arg("--release");
-        }
-        cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
+        push_cargo_args(
+            cmd,
+            target.map(|target| target.name.as_str()),
+            &options.cargo_args,
+            options.release,
+        );
 
         let mut verus_args = Vec::new();
         if options.log {
@@ -906,7 +919,7 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
         }
         verus_args.push(format!("--multiple-errors={}", options.max_errors));
         verus_args.extend(options.verus_args.clone());
-        push_cargo_and_verus_args(cmd, &options.cargo_args, &verus_args);
+        push_verus_args(cmd, &verus_args);
 
         let target_name = target
             .map(|target| target.name.as_str())
@@ -964,17 +977,16 @@ mod argument_tests {
     use super::*;
 
     #[test]
-    fn cargo_features_precede_the_verus_separator() {
+    fn cargo_features_precede_target_and_verus_args() {
         let mut cmd = Command::new("cargo-verus");
         cmd.arg("verify");
-        push_cargo_and_verus_args(
+        push_cargo_args(
             &mut cmd,
+            Some("ostd"),
             &["--features".to_string(), "irc11".to_string()],
-            &[
-                "--multiple-errors=5".to_string(),
-                "--verify-only-module=sync::rcu".to_string(),
-            ],
+            false,
         );
+        push_verus_args(&mut cmd, &["--verify-only-module=sync::rcu".to_string()]);
 
         let args = cmd
             .get_args()
@@ -984,11 +996,44 @@ mod argument_tests {
             args,
             [
                 "verify",
+                "-p",
+                "ostd",
                 "--features",
                 "irc11",
+                "--target",
+                VERIFICATION_RUST_TARGET,
                 "--",
-                "--multiple-errors=5",
                 "--verify-only-module=sync::rcu",
+            ]
+        );
+    }
+
+    #[test]
+    fn cargo_features_precede_release_for_build() {
+        let mut cmd = Command::new("cargo-verus");
+        cmd.arg("build");
+        push_cargo_args(
+            &mut cmd,
+            Some("ostd"),
+            &["--features".to_string(), "allow_panic".to_string()],
+            true,
+        );
+
+        let args = cmd
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "build",
+                "-p",
+                "ostd",
+                "--features",
+                "allow_panic",
+                "--release",
+                "--target",
+                VERIFICATION_RUST_TARGET,
             ]
         );
     }
