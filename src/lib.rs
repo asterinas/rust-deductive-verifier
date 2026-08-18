@@ -6,6 +6,7 @@ pub mod files;
 pub mod console;
 pub mod commands;
 pub mod config;
+pub mod count;
 pub mod dep_tree;
 pub mod doc;
 pub mod format;

@@ -44,6 +44,27 @@ cargo dv verify --targets ostd --features irc11 -- \
   --verify-only-module sync::rcu
 ```
 
+### Line counting
+
+Line counting is a separate command from verification. Count a complete target
+using its latest Cargo/Verus dependency information:
+
+```bash
+cargo dv count --targets ostd
+```
+
+To count one Rust module (including file-based submodules), select exactly one
+target and pass the Verus module path:
+
+```bash
+cargo dv count --targets ostd --module sync::rwlock
+```
+
+The default output is a per-file summary. Add `--print-all` (or `-p`) to print
+every annotated source line. Whole-target counting requires dependency
+information from a previous `cargo dv verify` or `cargo dv build`; module
+counting resolves source files directly and does not require it.
+
 ## Bootstrapping Verus
 
 By default, `cargo dv bootstrap` builds the `main` branch of

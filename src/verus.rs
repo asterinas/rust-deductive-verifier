@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 use memoize::memoize;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -195,8 +195,6 @@ pub struct ExtraOptions {
     pub cargo_args: Vec<String>,
     /// pass-through options to the Verus verifier
     pub verus_args: Vec<String>,
-    /// count lines of code
-    pub count_line: bool,
     /// use cargo-verus focus instead of cargo-verus verify
     pub focus: bool,
 }
@@ -611,144 +609,6 @@ fn move_verus_log_files(crate_name: &str) {
     }
 }
 
-fn dep_info_dirs(target_dir: &Path) -> Vec<PathBuf> {
-    let triple = VERIFICATION_RUST_TARGET;
-    [target_dir.join("verus-partial"), target_dir.to_path_buf()]
-        .into_iter()
-        .flat_map(|base| {
-            ["debug", "release"]
-                .into_iter()
-                .map(move |profile| base.join(triple).join(profile).join("deps"))
-        })
-        .collect()
-}
-
-fn dep_info_source_root(
-    dep_info: &Path,
-    target: &VerusTarget,
-    workspace_root: &Path,
-) -> Option<PathBuf> {
-    let first_line = BufReader::new(File::open(dep_info).ok()?)
-        .lines()
-        .next()?
-        .ok()?;
-    let target_file = target.file.canonicalize().ok()?;
-
-    for root in [workspace_root, target.dir.as_path()] {
-        if first_line
-            .split_whitespace()
-            .skip(1)
-            .map(|dependency| dependency.trim_end_matches('\\'))
-            .map(Path::new)
-            .map(|dependency| {
-                if dependency.is_absolute() {
-                    dependency.to_path_buf()
-                } else {
-                    root.join(dependency)
-                }
-            })
-            .filter_map(|dependency| dependency.canonicalize().ok())
-            .any(|dependency| dependency == target_file)
-        {
-            return Some(root.to_path_buf());
-        }
-    }
-
-    None
-}
-
-fn find_dep_info(target: &VerusTarget) -> Option<(PathBuf, PathBuf)> {
-    let target_dir = get_target_dir();
-    let workspace_root = get_workspace_root();
-
-    dep_info_dirs(&target_dir)
-        .into_iter()
-        .filter_map(|dir| fs::read_dir(dir).ok())
-        .flatten()
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| path.extension() == Some(OsStr::new("d")))
-        .filter_map(|path| {
-            let source_root = dep_info_source_root(&path, target, &workspace_root)?;
-            let modified = path.metadata().ok()?.modified().ok()?;
-            Some((modified, path, source_root))
-        })
-        .max_by_key(|(modified, _, _)| *modified)
-        .map(|(_, path, source_root)| (path, source_root))
-}
-
-struct TemporaryDepInfo {
-    path: PathBuf,
-}
-
-impl TemporaryDepInfo {
-    fn copy_into(source: &Path, root: &Path, crate_name: &str) -> Result<Self, DynError> {
-        for suffix in 0..100 {
-            let path = root.join(format!(
-                ".dv-line-count-{}-{}-{}.d",
-                crate_name,
-                std::process::id(),
-                suffix
-            ));
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut destination) => {
-                    let temporary_dep_info = Self { path };
-                    let mut source = File::open(source)?;
-                    std::io::copy(&mut source, &mut destination)?;
-                    return Ok(temporary_dep_info);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error.into()),
-            }
-        }
-
-        Err(format!(
-            "failed to create a temporary dep-info file in {}",
-            root.display()
-        )
-        .into())
-    }
-}
-
-impl Drop for TemporaryDepInfo {
-    fn drop(&mut self) {
-        if let Err(error) = fs::remove_file(&self.path) {
-            warn!(
-                "Failed to remove temporary dep-info file {}: {}",
-                self.path.display(),
-                error
-            );
-        }
-    }
-}
-
-fn run_line_count(target: &VerusTarget) -> Result<(), DynError> {
-    let (dep_info, source_root) = find_dep_info(target).ok_or_else(|| {
-        format!(
-            "could not find cargo-verus dep-info for target {} under {}",
-            target.name,
-            get_target_dir().display()
-        )
-    })?;
-    let temporary_dep_info = TemporaryDepInfo::copy_into(&dep_info, &source_root, &target.name)?;
-    let line_count_dir = install::verus_dir().join("source/tools/line_count");
-
-    println!("Counting lines for {}", target.name);
-    let status = Command::new("cargo")
-        .current_dir(&line_count_dir)
-        .arg("run")
-        .arg("--release")
-        .arg("--")
-        .arg("--deps")
-        .arg(&temporary_dep_info.path)
-        .status()?;
-    if !status.success() {
-        return Err(format!("line_count failed for target {}", target.name).into());
-    }
-
-    Ok(())
-}
-
 pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
     let z3 = get_z3();
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
@@ -774,9 +634,6 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         if options.trace {
             cmd.env("RUST_BACKTRACE", "full");
             verus_args.push("--trace".to_string());
-        }
-        if options.count_line {
-            verus_args.push("--emit=dep-info".to_string());
         }
         verus_args.push(format!("--multiple-errors={}", options.max_errors));
         verus_args.extend(options.verus_args.clone());
@@ -822,17 +679,6 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
             );
         }
 
-        if options.count_line {
-            let mut count_targets = match target {
-                Some(target) => vec![target.clone()],
-                None => verus_targets().into_values().collect(),
-            };
-            count_targets.sort_by(|left, right| left.name.cmp(&right.name));
-
-            for count_target in &count_targets {
-                run_line_count(count_target)?;
-            }
-        }
         Ok(())
     };
 
