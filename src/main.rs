@@ -25,6 +25,13 @@ enum Commands {
     Verify(VerifyArgs),
 
     #[command(
+        name = "count",
+        about = "Count Verus source lines by target or module",
+        alias = "cnt"
+    )]
+    Count(CountArgs),
+
+    #[command(
         name = "doc",
         about = "Generate documentation for the verification targets"
     )]
@@ -187,15 +194,6 @@ struct VerifyArgs {
     )]
     focus: bool,
 
-    #[arg(
-        short = 'c',
-        long = "count-line",
-        help = "Count the number of lines of code",
-        default_value = "false",
-        action = ArgAction::SetTrue
-    )]
-    count_line: bool,
-
     #[command(flatten, next_help_heading = "Cargo feature options")]
     cargo_features: clap_cargo::Features,
 
@@ -207,6 +205,36 @@ struct VerifyArgs {
         allow_hyphen_values = true
     )]
     verus_args: Vec<String>,
+}
+
+#[derive(Parser, Debug)]
+struct CountArgs {
+    #[arg(
+        short = 't',
+        long = "targets",
+        value_parser = verus::find_target,
+        help = "The targets to count",
+        num_args = 0..,
+        action = ArgAction::Append
+    )]
+    targets: Vec<VerusTarget>,
+
+    #[arg(
+        short = 'm',
+        long = "module",
+        value_name = "MODULE_PATH",
+        help = "Count only this module and its file-based submodules (for example, sync::rwlock)"
+    )]
+    module: Option<String>,
+
+    #[arg(
+        short = 'p',
+        long = "print-all",
+        help = "Print every annotated source line",
+        default_value = "false",
+        action = ArgAction::SetTrue
+    )]
+    print_all: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -447,11 +475,14 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         disasm: false,
         cargo_args: cargo_feature_args(&args.cargo_features),
         verus_args: args.verus_args.clone(),
-        count_line: args.count_line,
         focus: args.focus,
     };
 
     verus::exec_verify(&targets, &options)
+}
+
+fn count(args: &CountArgs) -> Result<(), DynError> {
+    count::exec_count(&args.targets, args.module.as_deref(), args.print_all)
 }
 
 fn doc(args: &DocArgs) -> Result<(), DynError> {
@@ -490,7 +521,6 @@ fn build(args: &BuildArgs) -> Result<(), DynError> {
         disasm: args.disasm,
         cargo_args: cargo_feature_args(&args.cargo_features),
         verus_args: args.verus_args.clone(),
-        count_line: false,
         focus: false,
     };
 
@@ -565,6 +595,7 @@ fn main() {
     let cli = Cli::parse();
     if let Err(e) = match &cli.command {
         Commands::Verify(args) => verify(args),
+        Commands::Count(args) => count(args),
         Commands::Doc(args) => doc(args),
         Commands::Bootstrap(args) => bootstrap(args),
         Commands::Build(args) => build(args),
@@ -574,7 +605,7 @@ fn main() {
         Commands::Format(args) => format(args),
         Commands::Clean(args) => clean(args),
     } {
-        error!("Error when executing command `{:?}`: {}", cli.command, e);
+        error!("Error: {}", e);
     }
 }
 
@@ -618,6 +649,19 @@ mod tests {
         assert!(args.cargo_features.all_features);
         assert_eq!(cargo_feature_args(&args.cargo_features), ["--all-features"]);
         assert!(args.verus_args.is_empty());
+    }
+
+    #[test]
+    fn count_accepts_a_module_and_print_all() {
+        let cli = Cli::try_parse_from(["dv", "count", "--module", "sync::rwlock", "--print-all"])
+            .unwrap();
+
+        let Commands::Count(args) = cli.command else {
+            panic!("expected count command");
+        };
+        assert!(args.targets.is_empty());
+        assert_eq!(args.module.as_deref(), Some("sync::rwlock"));
+        assert!(args.print_all);
     }
 
     #[test]

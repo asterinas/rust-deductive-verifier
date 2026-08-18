@@ -195,8 +195,6 @@ pub struct ExtraOptions {
     pub cargo_args: Vec<String>,
     /// pass-through options to the Verus verifier
     pub verus_args: Vec<String>,
-    /// count lines of code
-    pub count_line: bool,
     /// use cargo-verus focus instead of cargo-verus verify
     pub focus: bool,
 }
@@ -612,12 +610,6 @@ fn move_verus_log_files(crate_name: &str) {
 }
 
 pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(), DynError> {
-    if options.count_line {
-        eprintln!("Error: --count-line is currently unsupported with cargo-verus");
-        // TODO: Re-enable this path once cargo-verus can produce the dep-info expected by Verus' line_count tool.
-        return Err("--count-line is currently unsupported with cargo-verus".into());
-    }
-
     let z3 = get_z3();
     let run = |target: Option<&VerusTarget>| -> Result<(), DynError> {
         let ts_start = Instant::now();
@@ -642,9 +634,6 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         if options.trace {
             cmd.env("RUST_BACKTRACE", "full");
             verus_args.push("--trace".to_string());
-        }
-        if options.count_line {
-            verus_args.push("--emit=dep-info".to_string());
         }
         verus_args.push(format!("--multiple-errors={}", options.max_errors));
         verus_args.extend(options.verus_args.clone());
@@ -690,28 +679,6 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
             );
         }
 
-        if options.count_line {
-            let verus_root = install::verus_dir();
-            let line_count_dir = verus_root.join("source/tools/line_count");
-            let current_dir = std::env::current_dir()?;
-            let dependency_file = current_dir.join("lib.d");
-            std::env::set_current_dir(&line_count_dir)?;
-            let mut cargo_cmd = Command::new("cargo");
-            cargo_cmd
-                .arg("run")
-                .arg("--release")
-                .arg(&dependency_file)
-                .arg("-p");
-
-            println!(
-                "Counting lines for {}",
-                target.map(|t| t.name.as_str()).unwrap_or("workspace")
-            );
-            let line_count_result = cargo_cmd.status();
-            std::env::set_current_dir(current_dir)?;
-            line_count_result?;
-            fs::remove_file(&dependency_file)?;
-        }
         Ok(())
     };
 
