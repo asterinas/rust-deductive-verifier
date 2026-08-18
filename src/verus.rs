@@ -1372,14 +1372,6 @@ pub mod install {
             }
         }
 
-        let profile = if release { "release" } else { "debug" };
-        File::create(
-            source_dir
-                .join("target-verus")
-                .join(profile)
-                .join("verus-root"),
-        )?;
-
         status!("Verus build complete");
         Ok(())
     }
