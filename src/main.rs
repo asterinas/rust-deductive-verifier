@@ -22,7 +22,13 @@ enum Commands {
         about = "Verify the verification targets",
         alias = "v"
     )]
-    Verify(VerifyArgs),
+    Verify(VerificationArgs),
+
+    #[command(
+        name = "focus",
+        about = "Verify root targets without re-checking dependency proofs"
+    )]
+    Focus(VerificationArgs),
 
     #[command(
         name = "count",
@@ -131,8 +137,8 @@ struct BootstrapArgs {
     build_args: Vec<String>,
 }
 
-#[derive(Parser, Debug)]
-struct VerifyArgs {
+#[derive(clap::Args, Debug)]
+struct VerificationArgs {
     #[arg(
         short = 't',
         long = "targets", 
@@ -184,15 +190,6 @@ struct VerifyArgs {
         action = ArgAction::SetTrue
     )]
     debug: bool,
-
-    #[arg(
-        short = 'f',
-        long = "focus",
-        help = "Verify root crates without re-checking dependency proofs",
-        default_value = "false",
-        action = ArgAction::SetTrue
-    )]
-    focus: bool,
 
     #[command(flatten, next_help_heading = "Cargo feature options")]
     cargo_features: clap_cargo::Features,
@@ -465,7 +462,7 @@ fn cargo_feature_args(features: &clap_cargo::Features) -> Vec<String> {
     args
 }
 
-fn verify(args: &VerifyArgs) -> Result<(), DynError> {
+fn verify(args: &VerificationArgs, mode: verus::VerificationMode) -> Result<(), DynError> {
     let targets = args.targets.clone();
     let options = verus::ExtraOptions {
         max_errors: args.max_errors,
@@ -475,7 +472,7 @@ fn verify(args: &VerifyArgs) -> Result<(), DynError> {
         disasm: false,
         cargo_args: cargo_feature_args(&args.cargo_features),
         verus_args: args.verus_args.clone(),
-        focus: args.focus,
+        verification_mode: mode,
     };
 
     verus::exec_verify(&targets, &options)
@@ -521,7 +518,7 @@ fn build(args: &BuildArgs) -> Result<(), DynError> {
         disasm: args.disasm,
         cargo_args: cargo_feature_args(&args.cargo_features),
         verus_args: args.verus_args.clone(),
-        focus: false,
+        verification_mode: verus::VerificationMode::Verify,
     };
 
     verus::exec_build(&targets, &options)
@@ -594,7 +591,8 @@ fn format(args: &FmtArgs) -> Result<(), DynError> {
 fn main() {
     let cli = Cli::parse();
     if let Err(e) = match &cli.command {
-        Commands::Verify(args) => verify(args),
+        Commands::Verify(args) => verify(args, verus::VerificationMode::Verify),
+        Commands::Focus(args) => verify(args, verus::VerificationMode::Focus),
         Commands::Count(args) => count(args),
         Commands::Doc(args) => doc(args),
         Commands::Bootstrap(args) => bootstrap(args),
@@ -614,10 +612,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn verify_separates_cargo_features_from_verus_arguments() {
+    fn focus_separates_cargo_features_from_verus_arguments() {
         let cli = Cli::try_parse_from([
             "dv",
-            "verify",
+            "focus",
             "--features",
             "irc11 alloc",
             "--no-default-features",
@@ -627,8 +625,8 @@ mod tests {
         ])
         .unwrap();
 
-        let Commands::Verify(args) = cli.command else {
-            panic!("expected verify command");
+        let Commands::Focus(args) = cli.command else {
+            panic!("expected focus command");
         };
         assert_eq!(args.cargo_features.features, ["irc11", "alloc"]);
         assert!(args.cargo_features.no_default_features);

@@ -29,18 +29,40 @@ pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 cargo dv verify --targets <target1> <target2> ...
 ```
 
+### Verification modes
+
+Use `verify` for complete verification of the selected targets and their
+verification dependencies:
+
+```bash
+cargo dv verify --targets ostd
+```
+
+Use `focus` while iterating on root targets. Dependencies are still built so
+their types and specifications are available, but their proofs are not
+re-checked:
+
+```bash
+cargo dv focus --targets ostd
+```
+
+Focused artifacts are kept separate by `cargo-verus`; run a complete `verify`
+before committing.
+
 ### Cargo features and Verus arguments
 
-The `verify` and `build` commands accept Cargo's standard feature options:
+The `verify`, `focus`, and `build` commands accept Cargo's standard feature options:
 `-F`/`--features`, `--all-features`, and `--no-default-features`. DV forwards
 these options to `cargo-verus` before the verifier argument separator. Arguments
 after `--` continue to be passed directly to Verus.
 
 For example, this enables the `irc11` Cargo feature while asking Verus to check
-only one module:
+only one module. Partial verification selectors such as `--verify-module`,
+`--verify-only-module`, `--verify-function`, and `--verify-root` require the
+`focus` command:
 
 ```bash
-cargo dv verify --targets ostd --features irc11 -- \
+cargo dv focus --targets ostd --features irc11 -- \
   --verify-only-module sync::rcu
 ```
 
