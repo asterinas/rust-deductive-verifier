@@ -180,6 +180,21 @@ pub struct VerusTarget {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum VerificationMode {
+    Verify,
+    Focus,
+}
+
+impl VerificationMode {
+    fn cargo_verus_subcommand(&self) -> &'static str {
+        match self {
+            Self::Verify => "verify",
+            Self::Focus => "focus",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ExtraOptions {
     /// if log is enabled
     pub log: bool,
@@ -195,8 +210,8 @@ pub struct ExtraOptions {
     pub cargo_args: Vec<String>,
     /// pass-through options to the Verus verifier
     pub verus_args: Vec<String>,
-    /// use cargo-verus focus instead of cargo-verus verify
-    pub focus: bool,
+    /// whether cargo-verus performs full or focused verification
+    pub verification_mode: VerificationMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -616,10 +631,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
         let cmd = &mut Command::new(get_cargo_verus(options.release));
         cmd.env("RUSTC_BOOTSTRAP", "1")
             .env("VERUS_Z3_PATH", &z3)
-            .arg(if options.focus { "focus" } else { "verify" });
-        if !options.focus && verus_args_should_apply_to_roots_only(&options.verus_args) {
-            cmd.arg("--fwd-verus-args-to").arg("roots");
-        }
+            .arg(options.verification_mode.cargo_verus_subcommand());
         push_cargo_args(
             cmd,
             target.map(|target| target.name.as_str()),
@@ -797,17 +809,6 @@ fn strip_ansi_escape_codes(line: &str) -> String {
     plain
 }
 
-fn verus_args_should_apply_to_roots_only(args: &[String]) -> bool {
-    args.iter().any(|arg| {
-        matches!(
-            arg.as_str(),
-            "--verify-root" | "--verify-module" | "--verify-only-module" | "--verify-function"
-        ) || arg.starts_with("--verify-module=")
-            || arg.starts_with("--verify-only-module=")
-            || arg.starts_with("--verify-function=")
-    })
-}
-
 fn push_cargo_args(cmd: &mut Command, package: Option<&str>, cargo_args: &[String], release: bool) {
     if let Some(package) = package {
         cmd.arg("-p").arg(package);
@@ -866,9 +867,6 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
         cmd.env("RUSTC_BOOTSTRAP", "1")
             .env("VERUS_Z3_PATH", &z3)
             .arg("build");
-        if verus_args_should_apply_to_roots_only(&options.verus_args) {
-            cmd.arg("--fwd-verus-args-to").arg("roots");
-        }
         push_cargo_args(
             cmd,
             target.map(|target| target.name.as_str()),
@@ -946,7 +944,7 @@ mod argument_tests {
     #[test]
     fn cargo_features_precede_target_and_verus_args() {
         let mut cmd = Command::new("cargo-verus");
-        cmd.arg("verify");
+        cmd.arg(VerificationMode::Focus.cargo_verus_subcommand());
         push_cargo_args(
             &mut cmd,
             Some("ostd"),
@@ -962,7 +960,7 @@ mod argument_tests {
         assert_eq!(
             args,
             [
-                "verify",
+                "focus",
                 "-p",
                 "ostd",
                 "--features",
