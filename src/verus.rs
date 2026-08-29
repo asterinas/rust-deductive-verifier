@@ -1494,6 +1494,35 @@ pub mod install {
                 target_branch,
                 upstream_commit.id()
             );
+        } else if force_reset {
+            status!(
+                "Diverged from origin/{}, performing force reset",
+                target_branch
+            );
+
+            let refname = format!("refs/heads/{}", target_branch);
+            if repo.find_reference(&refname).is_err() {
+                repo.reference(
+                    &refname,
+                    upstream_commit.id(),
+                    false,
+                    &format!("Force reset to origin/{}", target_branch),
+                )?;
+            } else {
+                let mut reference = repo.find_reference(&refname)?;
+                reference.set_target(
+                    upstream_commit.id(),
+                    &format!("Force reset to origin/{}", target_branch),
+                )?;
+            }
+
+            repo.set_head(&refname)?;
+
+            let mut checkout_opts = git2::build::CheckoutBuilder::new();
+            checkout_opts.force();
+            repo.checkout_head(Some(&mut checkout_opts))?;
+
+            status!("Force reset to origin/{} completed", target_branch);
         } else {
             // Need to perform a merge
             let mut merge_opts = git2::MergeOptions::new();
@@ -1508,51 +1537,7 @@ pub mod install {
 
             // Check for conflicts
             if repo.index()?.has_conflicts() {
-                if force_reset {
-                    status!(
-                        "Conflicts detected, performing force reset to origin/{}",
-                        target_branch
-                    );
-
-                    // Reset the index to clean state
-                    repo.reset(
-                        &repo.head()?.peel_to_commit()?.as_object(),
-                        git2::ResetType::Hard,
-                        None,
-                    )?;
-
-                    // Force reset to the remote branch
-                    let refname = format!("refs/heads/{}", target_branch);
-
-                    // Create or update the local branch reference
-                    if repo.find_reference(&refname).is_err() {
-                        repo.reference(
-                            &refname,
-                            upstream_commit.id(),
-                            false,
-                            &format!("Force reset to origin/{}", target_branch),
-                        )?;
-                    } else {
-                        let mut reference = repo.find_reference(&refname)?;
-                        reference.set_target(
-                            upstream_commit.id(),
-                            &format!("Force reset to origin/{}", target_branch),
-                        )?;
-                    }
-
-                    // Set HEAD to the target branch
-                    repo.set_head(&refname)?;
-
-                    // Force checkout to update working directory
-                    let mut checkout_opts = git2::build::CheckoutBuilder::new();
-                    checkout_opts.force();
-                    repo.checkout_head(Some(&mut checkout_opts))?;
-
-                    status!("Force reset to origin/{} completed", target_branch);
-                    return Ok(());
-                } else {
-                    error!("There are conflicts between the recent updates and patches. Please resolve them manually.");
-                }
+                error!("There are conflicts between the recent updates and patches. Please resolve them manually.");
             }
 
             // Create the merge commit
