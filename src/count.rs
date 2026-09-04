@@ -290,7 +290,8 @@ fn run_module_line_count(
     print_all: bool,
 ) -> Result<(), DynError> {
     let module = module
-        .strip_prefix(&format!("{}::", target.name))
+        .strip_prefix(&format!("{}::", target.crate_name))
+        .or_else(|| module.strip_prefix(&format!("{}::", target.name)))
         .unwrap_or(module);
     let paths = module_source_paths(&target.file, module)?;
 

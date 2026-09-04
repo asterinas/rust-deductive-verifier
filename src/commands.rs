@@ -269,22 +269,22 @@ impl CargoBuildExterns {
         full
     }
 
-    pub fn parse_from_build_log(package: &str, stdout: &str, stderr: &str) -> Self {
+    pub fn parse_from_build_log(crate_name: &str, stdout: &str, stderr: &str) -> Self {
         let mut cargo_build = CargoBuildExterns::new(true);
         cargo_build.parse_library(stdout);
-        cargo_build.parse_last_level(package, stderr);
+        cargo_build.parse_last_level(crate_name, stderr);
         cargo_build
     }
 
-    pub fn parse_last_level(&mut self, package: &str, stderr: &str) {
+    pub fn parse_last_level(&mut self, crate_name: &str, stderr: &str) {
         let rustc_regex =
             Regex::new(r"^\s+Running\s+`.*rustc\s+.*--crate-name\s+(\S+)\s+.*$").unwrap();
         let extern_regex = Regex::new(r"--extern\s+([^=\s]+)=([^\s]+)").unwrap();
 
         for line in stderr.lines() {
             if let Some(caps) = rustc_regex.captures(line) {
-                let crate_name = caps.get(1).unwrap().as_str();
-                if crate_name != package {
+                let line_crate = caps.get(1).unwrap().as_str();
+                if line_crate != crate_name {
                     continue;
                 }
             }
@@ -352,6 +352,7 @@ impl CargoBuildExterns {
 /// But the package itself is not required to be built.
 pub fn cargo_build_resolve_deps(
     package: &str,
+    crate_name: &str,
     env: &HashMap<String, String>,
     release: bool,
 ) -> CargoBuildExterns {
@@ -377,7 +378,7 @@ pub fn cargo_build_resolve_deps(
         .arg(crate::verus::VERIFICATION_RUST_TARGET);
 
     let res = run_build_log_capture(&mut cmd);
-    CargoBuildExterns::parse_from_build_log(package, res.stdout.as_str(), res.stderr.as_str())
+    CargoBuildExterns::parse_from_build_log(crate_name, res.stdout.as_str(), res.stderr.as_str())
 }
 
 pub fn cargo_build(package: &str, env: &HashMap<String, String>, release: bool) {

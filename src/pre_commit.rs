@@ -21,7 +21,9 @@ fn main() {
     let mut found_errors = false;
     for (vt, t) in targets.iter() {
         let verus_target = t.root_file();
-        let package = members.get(vt).unwrap_or_else(|| {
+        // `targets` is keyed by crate identifier; metadata packages are keyed
+        // by the manifest package name.
+        let package = members.get(&t.name).unwrap_or_else(|| {
             fatal!("Unable to find target {} in metadata", vt);
         });
 
@@ -36,7 +38,7 @@ fn main() {
         if verus_target == cargo_target {
             warn!("Target [{}] has cargo target source path `{}` which is the same as the Verus target.\n\
                    Consider change `path=...` in `{}` to `path=src/.dummy.rs` to avoid build errors.",
-                   vt, cargo_target, package.manifest_path);
+                   t.name, cargo_target, package.manifest_path);
             found_errors = true;
         }
     }

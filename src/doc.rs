@@ -137,11 +137,14 @@ fn generate_single_target_doc(
     // Add dependencies that this target actually needs
     let deps = verus::get_local_dependency(target);
     for (_name, dep_target) in deps.iter() {
-        if dep_target.name != target.name {
-            if let Some(rlib_path) = find_local_dependency_rlib(&target_dir, &dep_target.name) {
-                let extern_name = dep_target.name.replace('-', "_");
-                cmd.arg("--extern")
-                    .arg(format!("{}={}", extern_name, rlib_path.display()));
+        if dep_target.crate_name != target.crate_name {
+            if let Some(rlib_path) = find_local_dependency_rlib(&target_dir, &dep_target.crate_name)
+            {
+                cmd.arg("--extern").arg(format!(
+                    "{}={}",
+                    dep_target.crate_name,
+                    rlib_path.display()
+                ));
             } else {
                 return Err(format!(
                     "Missing built dependency '{}' for target '{}'.\n\nPlease run:\n  cargo dv build",
@@ -217,7 +220,7 @@ fn generate_single_target_doc(
 
     // Set crate type and name
     cmd.arg("--crate-type=lib")
-        .arg(format!("--crate-name={}", target.name.replace('-', "_")));
+        .arg(format!("--crate-name={}", target.crate_name));
 
     if json_output {
         cmd.arg("--output-format").arg("json");
