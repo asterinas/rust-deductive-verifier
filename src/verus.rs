@@ -159,8 +159,11 @@ pub struct VerusDependency {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct VerusTarget {
-    /// name of the package
+    /// name of the package, as declared in `Cargo.toml` (e.g. `id-alloc`)
     pub name: String,
+    /// crate identifier of the package (e.g. `id_alloc`); differs from `name`
+    /// for packages with hyphens
+    pub crate_name: String,
     /// version of the package
     pub version: String,
     /// directory of the package
@@ -250,7 +253,7 @@ impl VerusTarget {
 
     pub fn library_proof(&self) -> PathBuf {
         get_target_dir()
-            .join(format!("{}.verusdata", self.name))
+            .join(format!("{}.verusdata", self.crate_name))
             .to_path_buf()
     }
 
@@ -258,7 +261,7 @@ impl VerusTarget {
         let lib = format!(
             "{}{}.{}",
             self.library_prefix(),
-            self.name,
+            self.crate_name,
             self.library_suffix()
         );
         get_target_dir().join(lib).to_path_buf()
@@ -357,7 +360,8 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
 
         // check if the package has a target
         if let Some(target) = package.targets.first() {
-            let name = package.name.as_str().replace('-', "_");
+            let name = package.name.as_str().to_string();
+            let crate_name = name.replace('-', "_");
             let version = package.version.to_string();
             let dir = Path::new(&package.manifest_path)
                 .parent()
@@ -386,9 +390,10 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
             let features = extract_features(package, ws_features.as_slice());
 
             targets.insert(
-                name.clone(),
+                crate_name.clone(),
                 VerusTarget {
                     name,
+                    crate_name,
                     version,
                     dir,
                     file,
@@ -410,8 +415,11 @@ pub fn verus_targets() -> HashMap<String, VerusTarget> {
 pub fn find_target(t: &str) -> Result<VerusTarget, String> {
     let all = verus_targets();
     let s = files::dir_as_package(t);
+    // Target names are keyed by crate identifier (`-` -> `_`); accept both
+    // spellings so users can pass the package name as well.
+    let key = s.replace('-', "_");
 
-    let target = all.get(&s).cloned().unwrap_or_else(|| {
+    let target = all.get(&key).cloned().unwrap_or_else(|| {
         error!(
             "Cannot find target {}\n\n  Targets available:\n{}",
             t,
@@ -435,12 +443,13 @@ fn get_local_dependency_direct(target: &VerusTarget) -> IndexMap<String, VerusTa
             // Not a local path dependency
             continue;
         }
-        if !all.contains_key(dep.name.as_str()) {
+        let dep_key = dep.name.replace('-', "_");
+        if !all.contains_key(&dep_key) {
             // Not in current workspace
             continue;
         }
-        let dep_target = all.get(dep.name.as_str()).unwrap();
-        deps.insert(dep.name.clone(), dep_target.clone());
+        let dep_target = all.get(&dep_key).unwrap();
+        deps.insert(dep_key, dep_target.clone());
     }
 
     deps
@@ -456,7 +465,7 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
         visited: &mut std::collections::HashSet<String>,
         _is_root: bool,
     ) {
-        let target_name = target.name.replace('-', "_");
+        let target_name = target.crate_name.clone();
 
         // Prevent infinite recursion
         if visited.contains(&target_name) {
@@ -469,9 +478,8 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
 
         // Add direct dependencies to result (unless it's the root target)
         for (dep_name, dep_target) in direct_deps.iter() {
-            let dep_key = dep_name.replace('-', "_");
-            if !result.contains_key(&dep_key) {
-                result.insert(dep_key, dep_target.clone());
+            if !result.contains_key(dep_name) {
+                result.insert(dep_name.clone(), dep_target.clone());
             }
             // Recursively collect dependencies of this dependency
             collect_deps_recursively(dep_target, result, visited, false);
@@ -489,7 +497,7 @@ pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<St
 
     let local_verus = verus_targets()
         .values()
-        .map(|t| t.name.replace('-', "_"))
+        .map(|t| t.crate_name.clone())
         .collect::<HashSet<_>>();
 
     for (name, path) in externs.iter() {
@@ -546,7 +554,12 @@ pub fn resolve_deps(target: &VerusTarget, release: bool) -> CargoBuildExterns {
     let dummy_rs = target.dir.join("src").join(".dummy.rs");
     files::touch(&dummy_rs.to_string_lossy());
 
-    let mut externs = commands::cargo_build_resolve_deps(&target.name, &HashMap::new(), release);
+    let mut externs = commands::cargo_build_resolve_deps(
+        &target.name,
+        &target.crate_name,
+        &HashMap::new(),
+        release,
+    );
 
     if externs.deps_ready {
         reorder_deps(target, &mut externs);
@@ -682,7 +695,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
 
             if options.log && target.is_some() {
                 let target = target.unwrap();
-                move_verus_log_files(&target.name);
+                move_verus_log_files(&target.crate_name);
             }
         } else {
             error!(
