@@ -45,7 +45,6 @@ dotenv = { version = "*" }
 log = { version = "*" }
 log4rs = { version = "*", features = ["gzip"] }
 walkdir = { version = "*" }
-rayon = { version = "*" }
 toml_edit = { version = "*" }
 
 syn = { version = "2", features = ["full", "extra-traits"] }
