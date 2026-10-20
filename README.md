@@ -26,8 +26,22 @@ pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 3. Now, you can use the provided commands with `cargo dv`:
 
 ```bash
-cargo dv verify --targets <target1> <target2> ...
+cargo dv verify --package <package1> <package2> ...
 ```
+
+### Packages and CPU targets
+
+`--package` (`-p`) selects the packages to verify, build, or count. `--target`
+selects the CPU architecture, and it is passed to `cargo-verus` as `--target`:
+
+```bash
+cargo dv verify --package ostd --target x86_64-unknown-none
+```
+
+The default is `x86_64-unknown-none`. The other accepted triples are
+`riscv64imac-unknown-none-elf` and `loongarch64-unknown-none-softfloat`. These
+are experimental: `ostd` does not yet build for them, so the command is expected
+to fail.
 
 ### Verification modes
 
@@ -35,7 +49,7 @@ Use `verify` for complete verification of the selected targets and their
 verification dependencies:
 
 ```bash
-cargo dv verify --targets ostd
+cargo dv verify --package ostd
 ```
 
 Use `focus` while iterating on root targets. Dependencies are still built so
@@ -43,7 +57,7 @@ their types and specifications are available, but their proofs are not
 re-checked:
 
 ```bash
-cargo dv focus --targets ostd
+cargo dv focus --package ostd
 ```
 
 Focused artifacts are kept separate by `cargo-verus`; run a complete `verify`
@@ -62,7 +76,7 @@ only one module. Partial verification selectors such as `--verify-module`,
 `focus` command:
 
 ```bash
-cargo dv focus --targets ostd --features irc11 -- \
+cargo dv focus --package ostd --features irc11 -- \
   --verify-only-module sync::rcu
 ```
 
@@ -72,17 +86,17 @@ Line counting is a separate command from verification. Count a complete target
 using its latest Cargo/Verus dependency information:
 
 ```bash
-cargo dv count --targets ostd
+cargo dv count --package ostd
 ```
 
 To count one Rust module (including file-based submodules), select exactly one
 target and pass the Verus module path:
 
 ```bash
-cargo dv count --targets ostd --module sync::rwlock
+cargo dv count --package ostd --module sync::rwlock
 ```
 
-The default output is a per-file summary. Add `--print-all` (or `-p`) to print
+The default output is a per-file summary. Add `--print-all` (or `-a`) to print
 every annotated source line. Whole-target counting requires dependency
 information from a previous `cargo dv verify` or `cargo dv build`; module
 counting resolves source files directly and does not require it.

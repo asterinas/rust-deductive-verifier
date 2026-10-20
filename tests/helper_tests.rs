@@ -101,7 +101,7 @@ mod tests {
         assert!(!all.is_empty(), "No targets found");
 
         let x = all.get("empty").unwrap();
-        verus::resolve_deps_cached(x, true);
+        verus::resolve_deps_cached(x, true, verus::DEFAULT_RUST_TARGET);
     }
 
     #[test]
