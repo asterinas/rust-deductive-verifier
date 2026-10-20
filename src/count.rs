@@ -4,19 +4,15 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::verus::{
-    self, get_target_dir, get_workspace_root, DynError, VerusTarget, VERIFICATION_RUST_TARGET,
-};
+use crate::verus::{self, get_target_dir, get_workspace_root, DynError, VerusTarget};
 
-fn dep_info_dirs(target_dir: &Path) -> Vec<PathBuf> {
+fn dep_info_dirs(target_dir: &Path, rust_target: &str) -> Vec<PathBuf> {
     [target_dir.join("verus-partial"), target_dir.to_path_buf()]
         .into_iter()
         .flat_map(|base| {
-            ["debug", "release"].into_iter().map(move |profile| {
-                base.join(VERIFICATION_RUST_TARGET)
-                    .join(profile)
-                    .join("deps")
-            })
+            ["debug", "release"]
+                .into_iter()
+                .map(move |profile| base.join(rust_target).join(profile).join("deps"))
         })
         .collect()
 }
@@ -55,11 +51,11 @@ fn dep_info_source_root(
     None
 }
 
-fn find_dep_info(target: &VerusTarget) -> Option<(PathBuf, PathBuf)> {
+fn find_dep_info(target: &VerusTarget, rust_target: &str) -> Option<(PathBuf, PathBuf)> {
     let target_dir = get_target_dir();
     let workspace_root = get_workspace_root();
 
-    dep_info_dirs(&target_dir)
+    dep_info_dirs(&target_dir, rust_target)
         .into_iter()
         .filter_map(|dir| fs::read_dir(dir).ok())
         .flatten()
@@ -133,10 +129,14 @@ fn line_count_command(print_all: bool) -> Command {
     command
 }
 
-fn run_line_count(target: &VerusTarget, print_all: bool) -> Result<(), DynError> {
-    let (dep_info, source_root) = find_dep_info(target).ok_or_else(|| {
+fn run_line_count(
+    target: &VerusTarget,
+    print_all: bool,
+    rust_target: &str,
+) -> Result<(), DynError> {
+    let (dep_info, source_root) = find_dep_info(target, rust_target).ok_or_else(|| {
         format!(
-            "could not find cargo-verus dep-info for target {} under {}; run `cargo dv verify --targets {}` first",
+            "could not find cargo-verus dep-info for target {} under {}; run `cargo dv verify --package {}` first",
             target.name,
             get_target_dir().display(),
             target.name
@@ -193,7 +193,60 @@ fn available_modules_message(source: &str, resolved: &[&str]) -> String {
     )
 }
 
-fn module_source_paths(crate_root: &Path, module: &str) -> Result<Vec<PathBuf>, DynError> {
+/// The `target_arch` cfg value that `ostd` uses to select an architecture module
+/// for a Rust target triple. Mirrors the `cfg(target_arch = ...)` mounts in
+/// `ostd/src/lib.rs`.
+fn target_arch_for(rust_target: &str) -> &'static str {
+    match rust_target.split('-').next().unwrap_or_default() {
+        "riscv64imac" | "riscv64gc" => "riscv64",
+        "loongarch64" => "loongarch64",
+        _ => "x86_64",
+    }
+}
+
+/// Find the `#[path]` attribute that declares `mod <segment>` for `rust_target`.
+///
+/// A module may be declared several times under different `cfg`s, as the arch
+/// mounts in `ostd/src/lib.rs` are. The declaration whose `cfg(target_arch)`
+/// matches the target wins; a declaration without a `cfg` is the fallback.
+fn path_attribute_for(
+    source: &str,
+    segment: &str,
+    rust_target: &str,
+) -> Result<Option<String>, DynError> {
+    let declaration = regex::Regex::new(&format!(
+        r#"(?s)((?:#\s*\[[^\]]*\]\s*)*)#\s*\[\s*path\s*=\s*"([^"]+)"\s*\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+{}\s*;"#,
+        regex::escape(segment)
+    ))?;
+    let arch = target_arch_for(rust_target);
+    let mut fallback = None;
+    for captures in declaration.captures_iter(source) {
+        let attributes = captures.get(1).map_or("", |m| m.as_str());
+        let path = captures[2].to_string();
+        match cfg_target_arch(attributes) {
+            Some(cfg_arch) if cfg_arch == arch => return Ok(Some(path)),
+            Some(_) => {}
+            None => fallback = fallback.or(Some(path)),
+        }
+    }
+    Ok(fallback)
+}
+
+/// The `target_arch` named by the last `cfg(target_arch = "...")` in `attributes`,
+/// if any. Only the attributes immediately preceding a declaration are passed in.
+fn cfg_target_arch(attributes: &str) -> Option<String> {
+    let cfg =
+        regex::Regex::new(r#"#\s*\[\s*cfg\s*\(\s*target_arch\s*=\s*"([^"]+)"\s*\)\s*\]"#).ok()?;
+    cfg.captures_iter(attributes)
+        .last()
+        .map(|captures| captures[1].to_string())
+}
+
+fn module_source_paths(
+    crate_root: &Path,
+    module: &str,
+    rust_target: &str,
+) -> Result<Vec<PathBuf>, DynError> {
     let segments = module
         .split("::")
         .map(|segment| segment.strip_prefix("r#").unwrap_or(segment))
@@ -215,15 +268,8 @@ fn module_source_paths(crate_root: &Path, module: &str) -> Result<Vec<PathBuf>, 
             .parent()
             .ok_or_else(|| format!("crate root {} has no parent", current.display()))?;
         let source = fs::read_to_string(&current)?;
-        let path_pattern = regex::Regex::new(&format!(
-            r#"(?s)#\s*\[\s*path\s*=\s*"([^"]+)"\s*\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+{}\s*;"#,
-            regex::escape(segment)
-        ))?;
-        if let Some(path) = path_pattern
-            .captures(&source)
-            .and_then(|captures| captures.get(1))
-        {
-            let path = parent.join(path.as_str());
+        if let Some(path) = path_attribute_for(&source, segment, rust_target)? {
+            let path = parent.join(path);
             if !path.is_file() {
                 return Err(format!(
                     "module `{module}` has #[path = {:?}], but {} is not a file",
@@ -288,12 +334,13 @@ fn run_module_line_count(
     target: &VerusTarget,
     module: &str,
     print_all: bool,
+    rust_target: &str,
 ) -> Result<(), DynError> {
     let module = module
         .strip_prefix(&format!("{}::", target.crate_name))
         .or_else(|| module.strip_prefix(&format!("{}::", target.name)))
         .unwrap_or(module);
-    let paths = module_source_paths(&target.file, module)?;
+    let paths = module_source_paths(&target.file, module, rust_target)?;
 
     println!("Counting lines for {} module {}", target.name, module);
     let status = line_count_command(print_all).args(&paths).status()?;
@@ -307,9 +354,10 @@ pub fn exec_count(
     targets: &[VerusTarget],
     module: Option<&str>,
     print_all: bool,
+    rust_target: &str,
 ) -> Result<(), DynError> {
     if module.is_some() && targets.len() != 1 {
-        return Err("--module requires exactly one --targets value".into());
+        return Err("--module requires exactly one --package value".into());
     }
 
     let mut count_targets = if targets.is_empty() {
@@ -321,9 +369,9 @@ pub fn exec_count(
 
     for target in &count_targets {
         if let Some(module) = module {
-            run_module_line_count(target, module, print_all)?;
+            run_module_line_count(target, module, print_all, rust_target)?;
         } else {
-            run_line_count(target, print_all)?;
+            run_line_count(target, print_all, rust_target)?;
         }
     }
     Ok(())
@@ -342,7 +390,8 @@ mod tests {
         fs::write(src.join("sync/mod.rs"), "mod rwlock;\n").unwrap();
         fs::write(src.join("sync/rwlock.rs"), "struct RwLock;\n").unwrap();
 
-        let paths = module_source_paths(&src.join("lib.rs"), "sync::rwlock").unwrap();
+        let paths = module_source_paths(&src.join("lib.rs"), "sync::rwlock", "x86_64-unknown-none")
+            .unwrap();
         assert_eq!(paths, [src.join("sync/rwlock.rs")]);
     }
 
@@ -355,7 +404,8 @@ mod tests {
         fs::write(src.join("sync/mod.rs"), "mod rwlock;\n").unwrap();
         fs::write(src.join("sync/rwlock.rs"), "struct RwLock;\n").unwrap();
 
-        let paths = module_source_paths(&src.join("lib.rs"), "sync").unwrap();
+        let paths =
+            module_source_paths(&src.join("lib.rs"), "sync", "x86_64-unknown-none").unwrap();
         assert_eq!(paths, [src.join("sync")]);
     }
 
@@ -372,8 +422,39 @@ mod tests {
         fs::write(src.join("arch/x86/mod.rs"), "mod irq;\n").unwrap();
         fs::write(src.join("arch/x86/irq.rs"), "fn enable() {}\n").unwrap();
 
-        let paths = module_source_paths(&src.join("lib.rs"), "arch::irq").unwrap();
+        let paths =
+            module_source_paths(&src.join("lib.rs"), "arch::irq", "x86_64-unknown-none").unwrap();
         assert_eq!(paths, [src.join("arch/x86/irq.rs")]);
+    }
+
+    #[test]
+    fn selects_the_path_attribute_matching_the_rust_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let src = temp.path().join("src");
+        fs::create_dir_all(src.join("arch/x86")).unwrap();
+        fs::create_dir_all(src.join("arch/riscv")).unwrap();
+        fs::write(
+            src.join("lib.rs"),
+            "#[cfg(target_arch = \"x86_64\")]\n#[path = \"arch/x86/mod.rs\"]\npub mod arch;\n\
+             #[cfg(target_arch = \"riscv64\")]\n#[path = \"arch/riscv/mod.rs\"]\npub mod arch;\n",
+        )
+        .unwrap();
+        fs::write(src.join("arch/x86/mod.rs"), "mod irq;\n").unwrap();
+        fs::write(src.join("arch/x86/irq.rs"), "fn enable() {}\n").unwrap();
+        fs::write(src.join("arch/riscv/mod.rs"), "mod irq;\n").unwrap();
+        fs::write(src.join("arch/riscv/irq.rs"), "fn enable() {}\n").unwrap();
+
+        let riscv = module_source_paths(
+            &src.join("lib.rs"),
+            "arch::irq",
+            "riscv64imac-unknown-none-elf",
+        )
+        .unwrap();
+        assert_eq!(riscv, [src.join("arch/riscv/irq.rs")]);
+
+        let x86 =
+            module_source_paths(&src.join("lib.rs"), "arch::irq", "x86_64-unknown-none").unwrap();
+        assert_eq!(x86, [src.join("arch/x86/irq.rs")]);
     }
 
     #[test]
@@ -388,7 +469,7 @@ mod tests {
         .unwrap();
         fs::write(src.join("sync/mod.rs"), "mod rwlock;\n").unwrap();
 
-        let error = module_source_paths(&src.join("lib.rs"), "sy")
+        let error = module_source_paths(&src.join("lib.rs"), "sy", "x86_64-unknown-none")
             .unwrap_err()
             .to_string();
         assert!(error.contains("available modules:\n  sync\n  task"));
@@ -403,7 +484,7 @@ mod tests {
         fs::write(src.join("lib.rs"), "mod sync;\n").unwrap();
         fs::write(src.join("sync/mod.rs"), "mod mutex;\nmod rwlock;\n").unwrap();
 
-        let error = module_source_paths(&src.join("lib.rs"), "sync::rw")
+        let error = module_source_paths(&src.join("lib.rs"), "sync::rw", "x86_64-unknown-none")
             .unwrap_err()
             .to_string();
         assert!(error.contains("available modules:\n  sync::mutex\n  sync::rwlock"));
