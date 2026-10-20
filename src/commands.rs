@@ -355,6 +355,7 @@ pub fn cargo_build_resolve_deps(
     crate_name: &str,
     env: &HashMap<String, String>,
     release: bool,
+    rust_target: &str,
 ) -> CargoBuildExterns {
     let mut cmd = Command::new("cargo");
     for (env_key, env_value) in env {
@@ -371,11 +372,10 @@ pub fn cargo_build_resolve_deps(
     if release {
         cmd.arg("--release");
     }
-    // Resolve dependencies for the same verification target triple that
+    // Resolve dependencies for the same Rust target triple that
     // `cargo dv build`/`cargo dv verify` use, so the recorded extern paths are
     // compatible with rustdoc when generating docs for that target.
-    cmd.arg("--target")
-        .arg(crate::verus::VERIFICATION_RUST_TARGET);
+    cmd.arg("--target").arg(rust_target);
 
     let res = run_build_log_capture(&mut cmd);
     CargoBuildExterns::parse_from_build_log(crate_name, res.stdout.as_str(), res.stderr.as_str())

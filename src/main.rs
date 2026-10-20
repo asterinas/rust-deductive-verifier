@@ -148,6 +148,15 @@ struct VerificationArgs {
     targets: Vec<VerusTarget>,
 
     #[arg(
+        long = "rust-target",
+        value_name = "TRIPLE",
+        default_value = verus::DEFAULT_RUST_TARGET,
+        value_parser = verus::parse_rust_target,
+        help = "Rust target triple of the CPU architecture to verify (`--targets` still selects packages)",
+        action = ArgAction::Set)]
+    rust_target: String,
+
+    #[arg(
         short = 'e',
         long = "max-errors",
         help = "The maximum number of errors to display",
@@ -216,6 +225,15 @@ struct CountArgs {
     targets: Vec<VerusTarget>,
 
     #[arg(
+        long = "rust-target",
+        value_name = "TRIPLE",
+        default_value = verus::DEFAULT_RUST_TARGET,
+        value_parser = verus::parse_rust_target,
+        help = "Rust target triple of the CPU architecture to verify (`--targets` still selects packages)",
+        action = ArgAction::Set)]
+    rust_target: String,
+
+    #[arg(
         short = 'm',
         long = "module",
         value_name = "MODULE_PATH",
@@ -241,6 +259,15 @@ struct DocArgs {
         help = "The target to generate documentation for (along with its dependencies)"
     )]
     target: String,
+
+    #[arg(
+        long = "rust-target",
+        value_name = "TRIPLE",
+        default_value = verus::DEFAULT_RUST_TARGET,
+        value_parser = verus::parse_rust_target,
+        help = "Rust target triple of the CPU architecture to verify (`--targets` still selects packages)",
+        action = ArgAction::Set)]
+    rust_target: String,
 
     #[arg(
         long = "no-verus-conds",
@@ -276,6 +303,15 @@ struct BuildArgs {
         num_args = 0..,
         action = ArgAction::Append)]
     targets: Vec<VerusTarget>,
+
+    #[arg(
+        long = "rust-target",
+        value_name = "TRIPLE",
+        default_value = verus::DEFAULT_RUST_TARGET,
+        value_parser = verus::parse_rust_target,
+        help = "Rust target triple of the CPU architecture to verify (`--targets` still selects packages)",
+        action = ArgAction::Set)]
+    rust_target: String,
 
     #[arg(
         short = 'i',
@@ -467,13 +503,19 @@ fn verify(args: &VerificationArgs, mode: verus::VerificationMode) -> Result<(), 
         cargo_args: cargo_feature_args(&args.cargo_features),
         verus_args: args.verus_args.clone(),
         verification_mode: mode,
+        rust_target: args.rust_target.clone(),
     };
 
     verus::exec_verify(&targets, &options)
 }
 
 fn count(args: &CountArgs) -> Result<(), DynError> {
-    count::exec_count(&args.targets, args.module.as_deref(), args.print_all)
+    count::exec_count(
+        &args.targets,
+        args.module.as_deref(),
+        args.print_all,
+        &args.rust_target,
+    )
 }
 
 fn doc(args: &DocArgs) -> Result<(), DynError> {
@@ -482,6 +524,7 @@ fn doc(args: &DocArgs) -> Result<(), DynError> {
         !args.no_verus_conds,
         args.verus_conds_debug,
         args.json_output,
+        &args.rust_target,
     )
 }
 
@@ -513,6 +556,7 @@ fn build(args: &BuildArgs) -> Result<(), DynError> {
         cargo_args: cargo_feature_args(&args.cargo_features),
         verus_args: args.verus_args.clone(),
         verification_mode: verus::VerificationMode::Verify,
+        rust_target: args.rust_target.clone(),
     };
 
     verus::exec_build(&targets, &options)
@@ -630,6 +674,22 @@ mod tests {
         assert!(args.cargo_features.all_features);
         assert_eq!(cargo_feature_args(&args.cargo_features), ["--all-features"]);
         assert!(args.verus_args.is_empty());
+    }
+
+    #[test]
+    fn rust_target_defaults_to_x86() {
+        let cli = Cli::try_parse_from(["dv", "verify"]).unwrap();
+        let Commands::Verify(args) = cli.command else {
+            panic!("expected verify command");
+        };
+        assert_eq!(args.rust_target, verus::DEFAULT_RUST_TARGET);
+    }
+
+    #[test]
+    fn rust_target_rejects_unsupported_triples() {
+        let err = Cli::try_parse_from(["dv", "build", "--rust-target", "aarch64-unknown-none"])
+            .unwrap_err();
+        assert!(err.to_string().contains("unsupported Rust target"));
     }
 
     #[test]

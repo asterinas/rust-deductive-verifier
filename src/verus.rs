@@ -26,7 +26,37 @@ pub type DynError = Box<dyn std::error::Error>;
 
 pub const CARGO_VERUS_BIN: &str = "cargo-verus";
 pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
-pub const VERIFICATION_RUST_TARGET: &str = "x86_64-unknown-none";
+/// Rust target triple used when `--rust-target` is not given.
+pub const DEFAULT_RUST_TARGET: &str = "x86_64-unknown-none";
+
+/// Rust target triples that `--rust-target` accepts. Every one has an architecture
+/// module mounted in `ostd/src/lib.rs`, but only the targets in
+/// `VALIDATED_RUST_TARGETS` currently build and verify.
+pub const SUPPORTED_RUST_TARGETS: &[&str] = &[
+    "x86_64-unknown-none",
+    "riscv64imac-unknown-none-elf",
+    "loongarch64-unknown-none-softfloat",
+];
+
+/// Rust target triples known to build and verify end to end.
+pub const VALIDATED_RUST_TARGETS: &[&str] = &["x86_64-unknown-none"];
+
+pub fn parse_rust_target(triple: &str) -> Result<String, String> {
+    if !SUPPORTED_RUST_TARGETS.contains(&triple) {
+        return Err(format!(
+            "unsupported Rust target `{triple}`; supported targets: {}",
+            SUPPORTED_RUST_TARGETS.join(", ")
+        ));
+    }
+    if !VALIDATED_RUST_TARGETS.contains(&triple) {
+        warn!(
+            "Rust target `{triple}` is experimental: ostd does not yet build for it, \
+             so this command is expected to fail. Validated targets: {}",
+            VALIDATED_RUST_TARGETS.join(", ")
+        );
+    }
+    Ok(triple.to_string())
+}
 
 pub const VERUS_HINT_RELEASE: &str = "tools/verus/source/target-verus/release";
 pub const VERUS_HINT: &str = "tools/verus/source/target-verus/debug";
@@ -215,6 +245,8 @@ pub struct ExtraOptions {
     pub verus_args: Vec<String>,
     /// whether cargo-verus performs full or focused verification
     pub verification_mode: VerificationMode,
+    /// Rust target triple the verified crate is compiled for
+    pub rust_target: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -490,8 +522,12 @@ pub fn get_local_dependency(target: &VerusTarget) -> IndexMap<String, VerusTarge
     result
 }
 
-pub fn get_remote_dependency(target: &VerusTarget, release: bool) -> IndexMap<String, String> {
-    let externs = resolve_deps_cached(target, release).renamed_full_externs();
+pub fn get_remote_dependency(
+    target: &VerusTarget,
+    release: bool,
+    rust_target: &str,
+) -> IndexMap<String, String> {
+    let externs = resolve_deps_cached(target, release, rust_target).renamed_full_externs();
 
     let mut deps = IndexMap::new();
 
@@ -550,7 +586,7 @@ pub fn reorder_deps(target: &VerusTarget, deps: &mut CargoBuildExterns) {
     })
 }
 
-pub fn resolve_deps(target: &VerusTarget, release: bool) -> CargoBuildExterns {
+pub fn resolve_deps(target: &VerusTarget, release: bool, rust_target: &str) -> CargoBuildExterns {
     let dummy_rs = target.dir.join("src").join(".dummy.rs");
     files::touch(&dummy_rs.to_string_lossy());
 
@@ -559,6 +595,7 @@ pub fn resolve_deps(target: &VerusTarget, release: bool) -> CargoBuildExterns {
         &target.crate_name,
         &HashMap::new(),
         release,
+        rust_target,
     );
 
     if externs.deps_ready {
@@ -569,8 +606,21 @@ pub fn resolve_deps(target: &VerusTarget, release: bool) -> CargoBuildExterns {
     CargoBuildExterns::default()
 }
 
-pub fn resolve_deps_cached(target: &VerusTarget, release: bool) -> serialization::Dependencies {
-    let deps_path = get_target_dir().join(format!("{}.deps.toml", target.name));
+/// Cache file name for a target's resolved dependencies.
+///
+/// Externs differ by Rust target triple (other architectures' artifacts) and by
+/// profile (`--release` changes the rlib directory), so both are part of the key.
+fn deps_cache_file_name(package: &str, release: bool, rust_target: &str) -> String {
+    let profile = if release { "release" } else { "debug" };
+    format!("{package}.{rust_target}.{profile}.deps.toml")
+}
+
+pub fn resolve_deps_cached(
+    target: &VerusTarget,
+    release: bool,
+    rust_target: &str,
+) -> serialization::Dependencies {
+    let deps_path = get_target_dir().join(deps_cache_file_name(&target.name, release, rust_target));
     let cargo_toml = target.dir.join("Cargo.toml");
     if deps_path.exists() && files::newer(&deps_path, &cargo_toml) {
         // cache is up to date, read it directly
@@ -578,7 +628,7 @@ pub fn resolve_deps_cached(target: &VerusTarget, release: bool) -> serialization
         deps
     } else {
         // rebuild cache
-        let externs = resolve_deps(target, release);
+        let externs = resolve_deps(target, release, rust_target);
         let deps: serialization::Dependencies = externs.into();
         serialization::serialize(&deps_path, &deps);
         deps
@@ -650,6 +700,7 @@ pub fn exec_verify(targets: &[VerusTarget], options: &ExtraOptions) -> Result<()
             target.map(|target| target.name.as_str()),
             &options.cargo_args,
             false,
+            &options.rust_target,
         );
 
         let mut verus_args = Vec::new();
@@ -822,7 +873,13 @@ fn strip_ansi_escape_codes(line: &str) -> String {
     plain
 }
 
-fn push_cargo_args(cmd: &mut Command, package: Option<&str>, cargo_args: &[String], release: bool) {
+fn push_cargo_args(
+    cmd: &mut Command,
+    package: Option<&str>,
+    cargo_args: &[String],
+    release: bool,
+    rust_target: &str,
+) {
     if let Some(package) = package {
         cmd.arg("-p").arg(package);
     }
@@ -832,7 +889,7 @@ fn push_cargo_args(cmd: &mut Command, package: Option<&str>, cargo_args: &[Strin
     if release {
         cmd.arg("--release");
     }
-    cmd.arg("--target").arg(VERIFICATION_RUST_TARGET);
+    cmd.arg("--target").arg(rust_target);
 }
 
 fn push_verus_args(cmd: &mut Command, verus_args: &[String]) {
@@ -885,6 +942,7 @@ pub fn exec_build(targets: &[VerusTarget], options: &ExtraOptions) -> Result<(),
             target.map(|target| target.name.as_str()),
             &options.cargo_args,
             options.release,
+            &options.rust_target,
         );
 
         let mut verus_args = Vec::new();
@@ -963,6 +1021,7 @@ mod argument_tests {
             Some("ostd"),
             &["--features".to_string(), "irc11".to_string()],
             false,
+            DEFAULT_RUST_TARGET,
         );
         push_verus_args(&mut cmd, &["--verify-only-module=sync::rcu".to_string()]);
 
@@ -979,7 +1038,7 @@ mod argument_tests {
                 "--features",
                 "irc11",
                 "--target",
-                VERIFICATION_RUST_TARGET,
+                DEFAULT_RUST_TARGET,
                 "--",
                 "--verify-only-module=sync::rcu",
             ]
@@ -995,6 +1054,7 @@ mod argument_tests {
             Some("ostd"),
             &["--features".to_string(), "allow_panic".to_string()],
             true,
+            DEFAULT_RUST_TARGET,
         );
 
         let args = cmd
@@ -1011,7 +1071,35 @@ mod argument_tests {
                 "allow_panic",
                 "--release",
                 "--target",
-                VERIFICATION_RUST_TARGET,
+                DEFAULT_RUST_TARGET,
+            ]
+        );
+    }
+
+    #[test]
+    fn cargo_target_follows_selected_rust_target() {
+        let mut cmd = Command::new("cargo-verus");
+        cmd.arg("build");
+        push_cargo_args(
+            &mut cmd,
+            Some("ostd"),
+            &[],
+            false,
+            "riscv64imac-unknown-none-elf",
+        );
+
+        let args = cmd
+            .get_args()
+            .map(|arg| arg.to_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "build",
+                "-p",
+                "ostd",
+                "--target",
+                "riscv64imac-unknown-none-elf",
             ]
         );
     }
