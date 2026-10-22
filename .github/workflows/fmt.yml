@@ -11,7 +11,7 @@ on:
 
 jobs:
   format-check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
 
