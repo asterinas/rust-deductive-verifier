@@ -39,7 +39,8 @@ pub const SUPPORTED_RUST_TARGETS: &[&str] = &[
 ];
 
 /// Rust target triples known to build and verify end to end.
-pub const VALIDATED_RUST_TARGETS: &[&str] = &["x86_64-unknown-none"];
+pub const VALIDATED_RUST_TARGETS: &[&str] =
+    &["x86_64-unknown-none", "riscv64imac-unknown-none-elf"];
 
 pub fn parse_rust_target(triple: &str) -> Result<String, String> {
     if !SUPPORTED_RUST_TARGETS.contains(&triple) {
