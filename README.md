@@ -38,10 +38,9 @@ selects the CPU architecture, and it is passed to `cargo-verus` as `--target`:
 cargo dv verify --package ostd --target x86_64-unknown-none
 ```
 
-The default is `x86_64-unknown-none`. The other accepted triples are
-`riscv64imac-unknown-none-elf` and `loongarch64-unknown-none-softfloat`. These
-are experimental: `ostd` does not yet build for them, so the command is expected
-to fail.
+The default is `x86_64-unknown-none`. `riscv64imac-unknown-none-elf` is also a
+validated target; `loongarch64-unknown-none-softfloat` is experimental: `ostd`
+does not yet build for it, so the command is expected to fail.
 
 ### Verification modes
 
