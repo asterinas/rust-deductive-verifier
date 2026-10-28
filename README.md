@@ -126,6 +126,13 @@ cargo dv bootstrap --upgrade --upstream-verus --branch irc11 \
   --build-arg=--vstd-weak-memory
 ```
 
+To check exec API alignment against an anchor repository, use the integrated
+alignment checker:
+
+```bash
+cargo dv alignment-check -i [path/to/config/toml]
+```
+
 Optionally, if you want to use the pre-commit hook, you can add the rusty-hook to your project:
 
 ```bash
