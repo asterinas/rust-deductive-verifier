@@ -1443,31 +1443,39 @@ pub mod install {
         let cargo = |subcommand: &str| {
             let mut cmd = Command::new("cargo");
             cmd.current_dir(&source_dir)
-                .env_remove("RUSTUP_TOOLCHAIN")
                 .env("RUSTUP_TOOLCHAIN", &toolchain_name)
                 .arg(subcommand);
             cmd
         };
 
-        let clean_cmd = cargo("clean");
-
-        let mut build_cmd = cargo("build");
-        if release {
-            build_cmd.arg("--release");
+        if release
+            && !cargo("make")
+                .arg("--version")
+                .output()
+                .is_ok_and(|out| out.status.success())
+        {
+            let status = cargo("install").args(["cargo-make", "--locked"]).status()?;
+            if !status.success() {
+                return Err(format!("Installing cargo-make failed with {}", status).into());
+            }
         }
-        build_cmd.args(["--features", "singular"]);
 
-        let mut vstd_cmd = cargo("run");
+        let mut build_cmd = cargo(if release { "make" } else { "build" });
         if release {
-            vstd_cmd.arg("--release");
+            build_cmd.arg("build");
+        } else {
+            build_cmd.args(["--features", "singular"]);
         }
-        vstd_cmd.args(vstd_build_args(release, extra_args));
-
-        for (mut cmd, description) in [
-            (clean_cmd, "Cleaning the Verus workspace"),
-            (build_cmd, "Building Verus"),
-            (vstd_cmd, "Building vstd"),
-        ] {
+        let mut commands = vec![(build_cmd, "Building Verus")];
+        if !release || !extra_args.is_empty() {
+            let mut vstd_cmd = cargo("run");
+            if release {
+                vstd_cmd.arg("--release");
+            }
+            vstd_cmd.args(vstd_build_args(release, extra_args));
+            commands.push((vstd_cmd, "Building vstd"));
+        }
+        for (mut cmd, description) in commands {
             debug!("{:?}", cmd);
             let status = cmd.status()?;
             if !status.success() {

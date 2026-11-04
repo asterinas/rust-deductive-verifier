@@ -103,7 +103,7 @@ struct BootstrapArgs {
     upgrade: bool,
 
     #[arg(
-        short = 'r',
+        short = 'd',
         long = "debug",
         help = "Build artifacts in debug mode",
         default_value = "false",
