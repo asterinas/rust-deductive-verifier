@@ -1464,6 +1464,7 @@ pub mod install {
         if release {
             build_cmd.arg("build");
         } else {
+            build_cmd.args(["--features", "singular"]);
         }
         let mut commands = vec![(build_cmd, "Building Verus")];
         if !release || !extra_args.is_empty() {
