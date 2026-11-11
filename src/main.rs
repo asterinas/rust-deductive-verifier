@@ -152,7 +152,7 @@ struct VerificationArgs {
         value_name = "TRIPLE",
         default_value = verus::DEFAULT_RUST_TARGET,
         value_parser = verus::parse_rust_target,
-        help = "Rust target triple of the CPU architecture to verify",
+        help = "Rust target triple (architecture, OS, and environment)",
         action = ArgAction::Set)]
     rust_target: String,
 
@@ -229,7 +229,7 @@ struct CountArgs {
         value_name = "TRIPLE",
         default_value = verus::DEFAULT_RUST_TARGET,
         value_parser = verus::parse_rust_target,
-        help = "Rust target triple of the CPU architecture to verify",
+        help = "Rust target triple (architecture, OS, and environment)",
         action = ArgAction::Set)]
     rust_target: String,
 
@@ -265,7 +265,7 @@ struct DocArgs {
         value_name = "TRIPLE",
         default_value = verus::DEFAULT_RUST_TARGET,
         value_parser = verus::parse_rust_target,
-        help = "Rust target triple of the CPU architecture to verify",
+        help = "Rust target triple (architecture, OS, and environment)",
         action = ArgAction::Set)]
     rust_target: String,
 
@@ -309,7 +309,7 @@ struct BuildArgs {
         value_name = "TRIPLE",
         default_value = verus::DEFAULT_RUST_TARGET,
         value_parser = verus::parse_rust_target,
-        help = "Rust target triple of the CPU architecture to verify",
+        help = "Rust target triple (architecture, OS, and environment)",
         action = ArgAction::Set)]
     rust_target: String,
 
@@ -690,6 +690,26 @@ mod tests {
         let err =
             Cli::try_parse_from(["dv", "build", "--target", "aarch64-unknown-none"]).unwrap_err();
         assert!(err.to_string().contains("unsupported Rust target"));
+    }
+
+    #[test]
+    fn commands_accept_linux_host_target() {
+        let triple = "x86_64-unknown-linux-gnu";
+        for command in ["verify", "focus", "build", "count", "doc"] {
+            let mut argv = vec!["dv", command, "--target", triple];
+            if command == "doc" {
+                argv.extend(["--package", "linux-bzimage-builder"]);
+            }
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let rust_target = match cli.command {
+                Commands::Verify(args) | Commands::Focus(args) => args.rust_target,
+                Commands::Build(args) => args.rust_target,
+                Commands::Count(args) => args.rust_target,
+                Commands::Doc(args) => args.rust_target,
+                _ => panic!("expected a command accepting --target"),
+            };
+            assert_eq!(rust_target, triple);
+        }
     }
 
     #[test]
