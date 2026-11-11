@@ -19,7 +19,7 @@ git clone [this-repo] dv
 
 ```toml
 [alias]
-dv = "run --manifest-path dv/Cargo.toml --bin dv --"
+dv = "run --manifest-path dv/Cargo.toml --bin rust-dv --"
 pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 ```
 
@@ -29,10 +29,10 @@ pre-commit = "run --manifest-path dv/Cargo.toml --bin pre_commit --"
 cargo dv verify --package <package1> <package2> ...
 ```
 
-### Packages and CPU targets
+### Packages and Rust targets
 
 `--package` (`-p`) selects the packages to verify, build, or count. `--target`
-selects the CPU architecture, and it is passed to `cargo-verus` as `--target`:
+selects the Rust target triple, and it is passed to `cargo-verus` as `--target`:
 
 ```bash
 cargo dv verify --package ostd --target x86_64-unknown-none
@@ -40,6 +40,15 @@ cargo dv verify --package ostd --target x86_64-unknown-none
 
 The default is `x86_64-unknown-none`. `riscv64imac-unknown-none-elf` and
 `loongarch64-unknown-none-softfloat` are also validated targets.
+
+### Linux host target
+
+Use `x86_64-unknown-linux-gnu` to verify packages that depend on `std`.
+For example, from the VOSTD workspace root:
+
+```bash
+cargo dv verify --package linux-bzimage-builder --target x86_64-unknown-linux-gnu
+```
 
 ### Verification modes
 

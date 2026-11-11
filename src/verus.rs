@@ -29,20 +29,22 @@ pub const CARGO_VERUS_ENV: &str = "CARGO_VERUS_PATH";
 /// Rust target triple used when `--target` is not given.
 pub const DEFAULT_RUST_TARGET: &str = "x86_64-unknown-none";
 
-/// Rust target triples that `--target` accepts. Every one has an architecture
-/// module mounted in `ostd/src/lib.rs`, but only the targets in
-/// `VALIDATED_RUST_TARGETS` currently build and verify.
+/// Rust target triples that `--target` accepts. Bare-metal targets support OSTD;
+/// the Linux host target supports packages that depend on `std`.
 pub const SUPPORTED_RUST_TARGETS: &[&str] = &[
     "x86_64-unknown-none",
     "riscv64imac-unknown-none-elf",
     "loongarch64-unknown-none-softfloat",
+    "x86_64-unknown-linux-gnu",
 ];
 
-/// Rust target triples known to build and verify end to end.
+/// Rust target triples exercised end to end with OSTD on bare-metal targets
+/// and `linux-bzimage-builder` on the Linux host target.
 pub const VALIDATED_RUST_TARGETS: &[&str] = &[
     "x86_64-unknown-none",
     "riscv64imac-unknown-none-elf",
     "loongarch64-unknown-none-softfloat",
+    "x86_64-unknown-linux-gnu",
 ];
 
 pub fn parse_rust_target(triple: &str) -> Result<String, String> {
@@ -54,8 +56,8 @@ pub fn parse_rust_target(triple: &str) -> Result<String, String> {
     }
     if !VALIDATED_RUST_TARGETS.contains(&triple) {
         warn!(
-            "Rust target `{triple}` is experimental: ostd does not yet build for it, \
-             so this command is expected to fail. Validated targets: {}",
+            "Rust target `{triple}` is experimental: build and verification have not \
+             been validated for it. Validated targets: {}",
             VALIDATED_RUST_TARGETS.join(", ")
         );
     }
@@ -1082,30 +1084,20 @@ mod argument_tests {
 
     #[test]
     fn cargo_target_follows_selected_rust_target() {
-        let mut cmd = Command::new("cargo-verus");
-        cmd.arg("build");
-        push_cargo_args(
-            &mut cmd,
-            Some("ostd"),
-            &[],
-            false,
-            "riscv64imac-unknown-none-elf",
-        );
+        for (package, triple) in [
+            ("ostd", "riscv64imac-unknown-none-elf"),
+            ("linux-bzimage-builder", "x86_64-unknown-linux-gnu"),
+        ] {
+            let mut cmd = Command::new("cargo-verus");
+            cmd.arg("build");
+            push_cargo_args(&mut cmd, Some(package), &[], false, triple);
 
-        let args = cmd
-            .get_args()
-            .map(|arg| arg.to_str().unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            args,
-            [
-                "build",
-                "-p",
-                "ostd",
-                "--target",
-                "riscv64imac-unknown-none-elf",
-            ]
-        );
+            let args = cmd
+                .get_args()
+                .map(|arg| arg.to_str().unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(args, ["build", "-p", package, "--target", triple]);
+        }
     }
 }
 
